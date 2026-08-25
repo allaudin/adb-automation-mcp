@@ -50,17 +50,17 @@ or multi-emulator dev box may have several devices attached at once. Implicit
 on?" bugs.
 
 **Decision:** Every device-scoped tool/resource takes an explicit `serial: str`
-parameter — no hidden current-device state on the server. A `list_connected_devices`
-tool exposes what's connected — originally planned as an `adb://devices` resource,
-shipped as a tool instead once MCP client resource support proved too inconsistent
-in practice (see ARCHITECTURE.md §7).
+parameter — no hidden current-device state on the server. An `adb://devices` resource
+exposes what's connected.
 
 **Consequences:** Costs one extra parameter per call, removes an entire class of
 ambiguity. A `resolve_serial` helper allows omitting `serial` when exactly one device
 is connected, otherwise raising `AmbiguousDeviceError` (multiple candidates) or
 `DeviceNotFoundError` (zero) — both carrying the list of currently-connected serials
-so the caller doesn't need a round trip to `list_connected_devices` just to see its
-options.
+so the caller doesn't need a round trip to `adb://devices` just to see its options.
+
+*Superseded in part by ADR-015: the `adb://devices` resource shipped as the
+`list_connected_devices` tool instead.*
 
 ---
 
@@ -340,6 +340,70 @@ fixture `CommandResult`s for domain scenarios must be realistic — captured or
 accurately transcribed from real `adb`/`pm`/`am`/`dumpsys` output, not hand-invented
 strings — since a service class's parsing logic is only a trustworthy predictor of
 real behavior if it was exercised against real-shaped text.
+
+---
+
+## ADR-015: Device Listing Shipped as a Tool, Not a Resource
+
+**Status:** Accepted — supersedes part of ADR-002
+
+**Context:** ADR-002 planned device listing as an `adb://devices` resource.
+Implementing it surfaced two problems, only discoverable once real MCP clients
+were in the loop (see ARCHITECTURE.md §9's Layer 3): fastmcp's resource-read path
+doesn't serialize pydantic models the way its tool path does, so the resource
+function crashed every real read; and, once that was fixed, resource support
+itself turned out to be inconsistent across clients — reading `adb://devices`
+worked from Claude Code but Claude Desktop couldn't read it at all.
+
+**Decision:** Device listing ships as the `list_connected_devices` tool (in a new
+`device_info` module, kept out of `diagnostics`) instead of the `adb://devices`
+resource. The resource was removed entirely rather than kept alongside the tool.
+
+**Consequences:** Tools work uniformly across MCP clients; resources currently
+don't, at least not to the same degree. `Registry.register_resources` and
+`wrap_resource` (ADR-011) stay in `registry.py`, exercised by
+`tests/unit/test_registry.py` and `tests/e2e/`'s `register_resources` call, for a
+future read where cache/re-read semantics are worth a client-compatibility
+tradeoff — but the default for new module data is now a tool, not a resource,
+until MCP client resource support is more consistent in practice.
+
+---
+
+## ADR-016: adb Server Lifecycle Backend Primitives, and a `connection` Module
+
+**Status:** Accepted — extends ADR-001
+
+**Context:** A `restart_adb_server` tool — kill the local adb server daemon and
+start it again — was needed for cases `check_adb_available` can't fix or even
+diagnose (a wedged server process, stale device state). It was first added to
+`diagnostics`, then moved out: `diagnostics` only *reports* on the health of an
+existing connection and never mutates anything, while restarting the server (and
+a planned future tool to connect to a device over TCP, `adb connect host:port`)
+*changes* the connection itself — a different concern, and one that shouldn't
+gate on `diagnostics`'s read-only framing. Unlike every existing backend method,
+neither of these is device-scoped: no `serial`, since they act on the adb server
+itself, not any particular device.
+
+**Decision:** New `connection` module, starting with `restart_adb_server`
+(`ConnectionService`). Add two primitives to `AdbBackend` (ADR-001),
+`kill_server` and `start_server`, one per real `adb` subcommand (`adb
+kill-server`, `adb start-server`) at the same mechanical-execution granularity as
+every other backend method — composing them into one domain action is the
+service layer's job (ADR-014), not the backend's. This grows ADR-001's Protocol
+past the "six primitive methods" it named at the time.
+
+**Consequences:** `ConnectionService.restart_adb_server` calls both in sequence
+and judges success on `start_server`'s exit code alone — `kill_server` is
+idempotent and effectively always reports success even when nothing was running,
+so surfacing its result would add noise, not signal. Verified against a real
+device: `SubprocessBackend.kill_server`/`start_server` produced the exact
+`FakeBackend` fixture output captured for the unit tests (`* daemon not running;
+starting now at tcp:5037` / `* daemon started successfully`) — but also
+demonstrated a real side effect worth documenting here rather than learning it
+again later: restarting the adb server drops any TCP-connected device (`adb
+connect host:port`) without reconnecting it automatically, unlike a USB device or
+a standard local emulator. `restart_adb_server`'s docstring warns that it's a
+global, non-device-scoped operation for this reason.
 
 ---
 

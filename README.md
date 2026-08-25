@@ -50,6 +50,7 @@ ADB_MCP_BACKEND=fake uv run adb-mcp-server
 |---|---|---|
 | `check_adb_available` | `read` | Checks whether `adb` is reachable and reports how many devices it currently sees. The right first call when anything else is misbehaving. |
 | `list_connected_devices` | `read` | Lists currently connected adb devices (serial, state, model, product), as reported by `adb devices -l`. |
+| `restart_adb_server` | `write` | Runs `adb kill-server` then `adb start-server`. Global, non-device-scoped — drops any TCP-connected device (`adb connect host:port`) without reconnecting it automatically. |
 
 ## Testing
 

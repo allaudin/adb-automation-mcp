@@ -25,11 +25,12 @@ An MCP server that exposes Android Debug Bridge (ADB) capabilities to MCP client
 - Per-user or per-identity RBAC. The policy layer governs which tools exist at all on
   a given server instance, not who is calling it.
 
-**Current implementation status (2026-08-25):** one module (`diagnostics`) exists
-under `src/adb_mcp/`, with tools `check_adb_available` and (if you've followed the
-add-a-tool walkthrough) `list_connected_devices`. It passes `mypy --strict`, `ruff`,
-`pytest`, and has been verified end-to-end through a real `fastmcp` `Client` call.
-CI (`.github/workflows/ci.yml`) runs lint, type-check, and tests on every push/PR to
+**Current implementation status (2026-08-25):** three modules exist under
+`src/adb_mcp/modules/`: `diagnostics` (`check_adb_available`), `device_info`
+(`list_connected_devices`), and `connection` (`restart_adb_server`). It passes
+`mypy --strict`, `ruff`, `pytest`, and has been verified end-to-end through a real
+`fastmcp` `Client` call (and, for `restart_adb_server`, against a real device). CI
+(`.github/workflows/ci.yml`) runs lint, type-check, and tests on every push/PR to
 `main`. Everything else described below — additional modules, the docs site, release
 automation, emulator integration — is the target shape, not yet built.
 
@@ -43,10 +44,12 @@ graph TB
     Registry <--> Policy["PolicyEngine<br/>(category rules from config)"]
     Registry --> ModDiag["diagnostics module"]
     Registry --> ModDevices["device_info module"]
+    Registry --> ModConn["connection module"]
     Registry -.-> ModExt["3rd-party module<br/>(separate PyPI package)"]
 
     ModDiag --> Backend["AdbBackend<br/>(Protocol)"]
     ModDevices --> Backend
+    ModConn --> Backend
     ModExt -.-> Backend
 
     Backend --> Sub["SubprocessBackend<br/>(production)"]
@@ -314,8 +317,9 @@ resource through it.
 
 ADR-002 originally called for an `adb://devices` resource; it shipped instead as
 the `list_connected_devices` tool in the `device_info` module (kept out of
-`diagnostics`, which is scoped to the health of the adb connection itself — e.g. a
-future "restart adb server" tool — not introspection of individual devices).
+`diagnostics`, which only reports on adb-connection health and never mutates
+anything — introspecting individual devices, restarting the server, or connecting
+to one over TCP each belong to a different module, per ADR-016).
 Reason: not every MCP client surfaces resources to the model as readily as it
 surfaces tools — confirmed directly, `adb://devices` worked when read from Claude
 Code but Claude Desktop couldn't read it at all. The tool form is the safe default
@@ -351,10 +355,12 @@ adb-mcp-server/
 │       │   └── testing.py    # FakeBackend
 │       └── modules/
 │           ├── diagnostics/  # service.py, tools.py, manifest.py
-│           └── device_info/  # service.py, tools.py, manifest.py
+│           ├── device_info/  # service.py, tools.py, manifest.py
+│           └── connection/   # service.py, tools.py, manifest.py
 └── tests/
     ├── meta/                 # Layer 0 — registry contract (typing + docstrings)
-    └── unit/                 # Layer 1, per module
+    ├── unit/                 # Layer 1, per module
+    └── e2e/                  # Layer 3 — protocol-level, real fastmcp.Client
 ```
 
 Single distribution (not a `uv` workspace of many packages) — built-in modules are

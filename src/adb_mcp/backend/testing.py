@@ -21,17 +21,33 @@ class FakeBackend:
         self,
         devices: list[DeviceInfo] | None = None,
         unavailable: bool = False,
+        kill_server_result: CommandResult | None = None,
+        start_server_result: CommandResult | None = None,
     ) -> None:
         self._devices = devices or []
         self._unavailable = unavailable
+        self._kill_server_result = kill_server_result or CommandResult(
+            stdout="", stderr="", exit_code=0, duration_ms=5.0
+        )
+        # Real `adb start-server` output when a server needs starting, captured
+        # from an actual run — see ADR-014 on why fixtures must be real-shaped.
+        self._start_server_result = start_server_result or CommandResult(
+            stdout="",
+            stderr="* daemon not running; starting now at tcp:5037\n* daemon started successfully\n",
+            exit_code=0,
+            duration_ms=180.0,
+        )
 
-    async def list_devices(self) -> list[DeviceInfo]:
+    def _raise_if_unavailable(self) -> None:
         if self._unavailable:
             raise AdbUnavailableError(
                 "Could not find or execute the adb binary (simulated).",
                 details={"adb_path": "adb"},
                 remediation="Install Android platform-tools and ensure 'adb' is on PATH.",
             )
+
+    async def list_devices(self) -> list[DeviceInfo]:
+        self._raise_if_unavailable()
         return list(self._devices)
 
     async def shell(self, serial: str, command: str) -> CommandResult:
@@ -48,3 +64,11 @@ class FakeBackend:
 
     async def pull(self, serial: str, remote_path: str, local_path: str) -> CommandResult:
         raise NotImplementedError("FakeBackend.pull: no module needs this yet")
+
+    async def kill_server(self) -> CommandResult:
+        self._raise_if_unavailable()
+        return self._kill_server_result
+
+    async def start_server(self) -> CommandResult:
+        self._raise_if_unavailable()
+        return self._start_server_result

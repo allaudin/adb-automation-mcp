@@ -17,6 +17,7 @@ adb-mcp-server = "adb_mcp.server:main"
 [project.entry-points."adb_mcp.modules"]
 diagnostics = "adb_mcp.modules.diagnostics.manifest:MODULE"
 device_info = "adb_mcp.modules.device_info.manifest:MODULE"
+connection = "adb_mcp.modules.connection.manifest:MODULE"
 
 [dependency-groups]
 dev = [

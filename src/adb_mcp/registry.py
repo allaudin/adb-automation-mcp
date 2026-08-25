@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from importlib.metadata import entry_points
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, get_type_hints
 
+from fastmcp.exceptions import ResourceError
+
 from adb_mcp.errors import AdbError
 from adb_mcp.policy import Category, PolicyEngine
 from adb_mcp.responses import ToolError, ToolResponse
@@ -121,18 +123,54 @@ def wrap_with_envelope(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Await
     # functools.wraps copied fn's own __annotations__ (including its raw `-> data_type`
     # return) onto wrapper; correct it to the actual enveloped return type so fastmcp's
     # outputSchema (generated from the wrapper it's actually given) matches reality.
+    # Copy the dict first: on Python < 3.14, functools.wraps aliases wrapper's
+    # __annotations__ to the *same* dict object as fn's (this stopped being true in
+    # 3.14 under PEP 649's lazy-annotations change, which masked this on newer
+    # interpreters) — mutating in place would corrupt fn's own return annotation too,
+    # so a second wrap_with_envelope(fn) call for the same fn (e.g. Registry.register_tools
+    # run more than once against the same discovered module in one process, as the
+    # Layer 3 E2E tests do) would double-envelope into ToolResponse[ToolResponse[T]].
+    wrapper.__annotations__ = dict(wrapper.__annotations__)
     wrapper.__annotations__["return"] = response_cls
+    return wrapper
+
+
+def wrap_resource(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+    """Converts a plain resource function (returns data, raises AdbError) into one
+    that raises fastmcp's ResourceError on failure instead.
+
+    Deliberately lighter-weight than wrap_with_envelope (ADR-011): a resource read
+    either returns its content directly or fails with a plain-text message — no
+    ToolResponse envelope, since there's no "data vs error" branch for a client to
+    switch on the way there is for a tool call result.
+    """
+
+    @functools.wraps(fn)
+    async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return await fn(*args, **kwargs)
+        except AdbError as exc:
+            logger.info("resource %s returned a domain error: %s", fn.__name__, exc)
+            message = str(exc) if not exc.remediation else f"{exc} {exc.remediation}"
+            raise ResourceError(message) from exc
+        except Exception:
+            logger.exception("unexpected error in resource %s", fn.__name__)
+            raise ResourceError(
+                "An unexpected server error occurred. This has been logged."
+            ) from None
+
     return wrapper
 
 
 class Registry:
     """Wires discovered modules up to a running FastMCP instance.
 
-    Two responsibilities, kept together because they happen at the same two moments
-    in a process's life: at startup, register_tools reads every module's manifest,
-    asks the PolicyEngine whether each tool is allowed, and hands the allowed ones
-    (wrapped in the response envelope) to FastMCP; later, build_services constructs
-    one service instance per module from the shared backend, once the backend exists.
+    Three responsibilities, kept together because they happen at the same moments
+    in a process's life: at startup, register_tools and register_resources each
+    read every module's manifest, ask the PolicyEngine whether each tool/resource is
+    allowed, and hand the allowed ones (wrapped in their respective envelopes) to
+    FastMCP; later, build_services constructs one service instance per module from
+    the shared backend, once the backend exists.
     """
 
     def __init__(self, policy: PolicyEngine) -> None:
@@ -153,10 +191,27 @@ class Registry:
                     )
                     continue
                 mcp.add_tool(wrap_with_envelope(fn))
-            # Resource registration intentionally not implemented yet: the exact
-            # fastmcp API for registering an already-defined function against a URI
-            # template hasn't been verified against real code. Wire this up when the
-            # first resource-bearing module (e.g. device_info) is built.
+
+    def register_resources(self, mcp: FastMCP, manifests: list[ModuleManifest]) -> None:
+        # Every resource is implicitly category "read" (ARCHITECTURE.md §7) — a
+        # resource is by definition an idempotent, addressable read, so there's no
+        # per-function @category marker to look up the way there is for tools; the
+        # policy engine's explicit allow/deny-by-name overrides still apply.
+        for manifest in manifests:
+            for uri, fn in manifest.resources:
+                if not self._policy.is_allowed(manifest.name, fn.__name__, "read"):
+                    logger.info(
+                        "policy denied resource %s.%s (uri=%s) — not registered",
+                        manifest.name,
+                        fn.__name__,
+                        uri,
+                    )
+                    continue
+                # Every resource here returns typed, structured data (mirroring
+                # tools) rather than raw text/binary, so application/json is the
+                # correct mime type uniformly — fastmcp defaults to text/plain
+                # otherwise, which would mislabel the actual JSON content.
+                mcp.resource(uri, mime_type="application/json")(wrap_resource(fn))
 
     def build_services(
         self, backend: AdbBackend, manifests: list[ModuleManifest]

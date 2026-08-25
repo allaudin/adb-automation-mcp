@@ -55,6 +55,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
 
 mcp = FastMCP(name="adb-mcp-server", lifespan=app_lifespan)
 _registry.register_tools(mcp, _manifests)
+_registry.register_resources(mcp, _manifests)
 
 
 def main() -> None:

@@ -50,14 +50,17 @@ or multi-emulator dev box may have several devices attached at once. Implicit
 on?" bugs.
 
 **Decision:** Every device-scoped tool/resource takes an explicit `serial: str`
-parameter — no hidden current-device state on the server. An `adb://devices` resource
-exposes what's connected.
+parameter — no hidden current-device state on the server. A `list_connected_devices`
+tool exposes what's connected — originally planned as an `adb://devices` resource,
+shipped as a tool instead once MCP client resource support proved too inconsistent
+in practice (see ARCHITECTURE.md §7).
 
 **Consequences:** Costs one extra parameter per call, removes an entire class of
 ambiguity. A `resolve_serial` helper allows omitting `serial` when exactly one device
 is connected, otherwise raising `AmbiguousDeviceError` (multiple candidates) or
 `DeviceNotFoundError` (zero) — both carrying the list of currently-connected serials
-so the caller doesn't need a round trip to `adb://devices` just to see its options.
+so the caller doesn't need a round trip to `list_connected_devices` just to see its
+options.
 
 ---
 

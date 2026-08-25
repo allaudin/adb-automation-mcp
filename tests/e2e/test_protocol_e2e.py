@@ -79,3 +79,14 @@ async def test_list_connected_devices_tool_empty_when_no_devices_connected() -> 
 
     assert result.data.status == "success"
     assert result.data.data == []
+
+
+@pytest.mark.asyncio
+async def test_restart_adb_server_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("restart_adb_server", {})
+
+    assert result.data.status == "success"
+    assert result.data.data.success is True

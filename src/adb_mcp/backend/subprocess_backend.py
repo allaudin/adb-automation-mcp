@@ -1,9 +1,11 @@
 """The real AdbBackend implementation: executes adb as a subprocess.
 
-Only `list_devices()` is exercised by the current scaffold (the diagnostics module);
-the remaining methods are implemented to the same standard but not yet covered by
-tests in this repo — they'll get contract-test coverage as the modules that use them
-are built.
+`list_devices`, `kill_server`, and `start_server` are exercised by modules built so
+far (diagnostics, device_info); `shell`, `install`, `uninstall`, `push`, and `pull`
+are implemented to the same standard but not yet used by any module. None of these
+have automated contract-test coverage against the real binary yet (ADR-004's Layer 2
+is not yet implemented) — verified manually against a real device for kill_server/
+start_server (ADR-016) instead.
 """
 
 from __future__ import annotations
@@ -90,6 +92,12 @@ class SubprocessBackend:
 
     async def pull(self, serial: str, remote_path: str, local_path: str) -> CommandResult:
         return await self._run("-s", serial, "pull", remote_path, local_path)
+
+    async def kill_server(self) -> CommandResult:
+        return await self._run("kill-server")
+
+    async def start_server(self) -> CommandResult:
+        return await self._run("start-server")
 
 
 def _parse_devices(stdout: str) -> list[DeviceInfo]:

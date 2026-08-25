@@ -31,8 +31,9 @@ An MCP server that exposes Android Debug Bridge (ADB) capabilities to MCP client
 `mypy --strict`, `ruff`, `pytest`, and has been verified end-to-end through a real
 `fastmcp` `Client` call (and, for `restart_adb_server`, against a real device). CI
 (`.github/workflows/ci.yml`) runs lint, type-check, and tests on every push/PR to
-`main`. Everything else described below — additional modules, the docs site, release
-automation, emulator integration — is the target shape, not yet built.
+`main`, plus a strict `mkdocs build` and (on merge to `main`) a GitHub Pages deploy
+(ADR-013). Everything else described below — additional modules, release automation,
+emulator integration — is the target shape, not yet built.
 
 ## 2. Component Architecture
 
@@ -333,14 +334,18 @@ genuinely matter more than universal client support.
 adb-mcp-server/
 ├── pyproject.toml
 ├── uv.lock
-├── README.md
-├── docs/
+├── mkdocs.yml                # docs site config — nav, theme, mkdocstrings (ADR-013)
+├── README.md                 # short pitch + link to the docs site; not the manual
+├── docs/                     # docs_dir for mkdocs — served at the Pages URL
+│   ├── index.md              # docs site home page (the old README content lives here)
 │   ├── ARCHITECTURE.md       # this file — current-state description
-│   └── ADR.md                # decision log — the "why"
+│   ├── ADR.md                # decision log — the "why"
+│   ├── reference/            # one page per module, mkdocstrings-generated from tools.py
+│   └── integrations/         # per-MCP-client setup guides
 ├── LICENSE
 ├── .github/
 │   └── workflows/
-│       └── ci.yml            # lint, type-check, tests — on every push/PR (current)
+│       └── ci.yml            # lint, type-check, tests, docs build/deploy — on every push/PR
 ├── src/
 │   └── adb_mcp/
 │       ├── __main__.py
@@ -410,10 +415,12 @@ implemented.
 
 ## 10. CI/CD
 
-**Current status:** `.github/workflows/ci.yml` runs `ruff check` → `mypy --strict` →
-`pytest` (Layer 0 + Layer 1 + Layer 3) on every push/PR to `main`, one Python
-version. That's
-the entire pipeline that exists right now.
+**Current status:** `.github/workflows/ci.yml` has two jobs: `test` (`ruff check` →
+`mypy --strict` → `pytest`, Layer 0 + Layer 1 + Layer 3, one Python version) and
+`docs` (`mkdocs build --strict` on every push/PR; `mkdocs gh-deploy` additionally, only
+on push to `main`). That's the entire pipeline that exists right now — folded into
+`ci.yml` rather than a separate `docs.yml`, since one extra job isn't yet enough to
+justify a second workflow file.
 
 **Target shape:**
 
@@ -436,9 +443,11 @@ flowchart LR
     Nightly -.->|failure pages, doesn't block merges| Main
 ```
 
-`nightly.yml`, `docs.yml`, and `release.yml` don't exist yet — each gets added once
-the infrastructure it depends on (contract/E2E/emulator tests, the mkdocs site,
-semantic-release config) actually exists, not ahead of it.
+`nightly.yml` and `release.yml` don't exist yet — each gets added once the
+infrastructure it depends on (contract/E2E/emulator tests, semantic-release config)
+actually exists, not ahead of it. The mkdocs build/deploy steps this diagram shows as
+`P5`/`M3` are implemented, currently as a `docs` job inside `ci.yml` rather than a
+standalone `docs.yml`.
 
 **Versioning:** SemVer, driven by Conventional Commits (`fix:`, `feat:`,
 `feat!:`/`BREAKING CHANGE:`) once `python-semantic-release` is wired up.

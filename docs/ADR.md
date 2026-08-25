@@ -6,7 +6,7 @@ sequence, how things fit together — see `ARCHITECTURE.md`. This file is a hist
 record; entries are not rewritten as the system evolves; a superseded decision gets a
 new entry that says so, the old one stays.
 
-Owner: dev.allaudin@gmail.com · Started: 2026-08-25
+Started: 2026-08-25
 
 ---
 

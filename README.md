@@ -3,8 +3,8 @@
 [![CI](https://github.com/allaudin/adb-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/allaudin/adb-mcp-server/actions/workflows/ci.yml)
 
 An MCP server exposing Android Debug Bridge (ADB) capabilities as typed, documented tools
-and resources. See `docs/ARCHITECTURE.md` for how the system is put together, and `docs/ADR.md`
-for why it's built that way.
+and resources. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the system is put
+together.
 
 
 ## Requirements
@@ -28,7 +28,7 @@ By default this talks to the `adb` binary found on `PATH`. Configure it with env
 | `ADB_MCP_BACKEND=fake` | Use the deterministic fake backend instead of real adb — no `adb` binary or device needed | unset (real backend) |
 | `ADB_MCP_ADB_PATH` | Explicit path to the `adb` binary | unset (resolved via `PATH`) |
 | `ADB_MCP_TIMEOUT_S` | Per-command timeout, in seconds | `10` |
-| `ADB_MCP_ALLOW_DESTRUCTIVE=1` | Opt in to `destructive`-category tools (ADR-010) | unset (denied by default) — no destructive tools exist yet, so this currently has no effect |
+| `ADB_MCP_ALLOW_DESTRUCTIVE=1` | Opt in to `destructive`-category tools | unset (denied by default) — no destructive tools exist yet, so this currently has no effect |
 
 `ADB_MCP_ADB_PATH` matters more than it might seem: an MCP client (Claude Code, Claude
 Desktop, ...) launches this server with a minimal environment that usually does **not**
@@ -49,6 +49,7 @@ ADB_MCP_BACKEND=fake uv run adb-mcp-server
 | Tool | Category | What it does |
 |---|---|---|
 | `check_adb_available` | `read` | Checks whether `adb` is reachable and reports how many devices it currently sees. The right first call when anything else is misbehaving. |
+| `list_connected_devices` | `read` | Lists currently connected adb devices (serial, state, model, product), as reported by `adb devices -l`. |
 
 ## Testing
 

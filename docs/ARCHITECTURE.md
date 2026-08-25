@@ -4,7 +4,6 @@ This describes the system as it currently stands: what exists, how a process boo
 and how the pieces work together. It does not explain *why* things are shaped this
 way — for that, see `ADR.md`, the decision log.
 
-Owner: mallaudinqazi@gmail.com
 Last updated: 2026-08-25
 
 ## 1. Overview
@@ -43,9 +42,11 @@ graph TB
     Server --> Registry["Registry<br/>(entry_points discovery)"]
     Registry <--> Policy["PolicyEngine<br/>(category rules from config)"]
     Registry --> ModDiag["diagnostics module"]
+    Registry --> ModDevices["device_info module"]
     Registry -.-> ModExt["3rd-party module<br/>(separate PyPI package)"]
 
     ModDiag --> Backend["AdbBackend<br/>(Protocol)"]
+    ModDevices --> Backend
     ModExt -.-> Backend
 
     Backend --> Sub["SubprocessBackend<br/>(production)"]
@@ -304,9 +305,23 @@ Heuristic applied consistently across modules:
 > a client might want to read/re-read/cache.
 
 Every resource is implicitly category `read`. Tools are tagged individually — the
-category is what the policy layer filters on. (Resource registration is not yet wired
-into `registry.py`; the `diagnostics` module's tools are read-category tools for now
-even where the heuristic above would call for a resource.)
+category is what the policy layer filters on. `Registry.register_resources` wires
+manifest resources into FastMCP via `mcp.resource(uri)`, wrapped by
+`wrap_resource` (ADR-011's lighter-weight, envelope-free error handling) rather
+than `wrap_with_envelope` — implemented and exercised (`tests/unit/test_registry.py`,
+`tests/e2e/`'s `register_resources` call), but no module currently registers a
+resource through it.
+
+ADR-002 originally called for an `adb://devices` resource; it shipped instead as
+the `list_connected_devices` tool in the `device_info` module (kept out of
+`diagnostics`, which is scoped to the health of the adb connection itself — e.g. a
+future "restart adb server" tool — not introspection of individual devices).
+Reason: not every MCP client surfaces resources to the model as readily as it
+surfaces tools — confirmed directly, `adb://devices` worked when read from Claude
+Code but Claude Desktop couldn't read it at all. The tool form is the safe default
+until a client-compatible way to offer both is worth the duplication; the resource
+machinery stays in place for a future read where re-read/cache semantics
+genuinely matter more than universal client support.
 
 ## 8. Repository Layout
 
@@ -335,7 +350,8 @@ adb-mcp-server/
 │       │   ├── subprocess_backend.py
 │       │   └── testing.py    # FakeBackend
 │       └── modules/
-│           └── diagnostics/  # service.py, tools.py, manifest.py
+│           ├── diagnostics/  # service.py, tools.py, manifest.py
+│           └── device_info/  # service.py, tools.py, manifest.py
 └── tests/
     ├── meta/                 # Layer 0 — registry contract (typing + docstrings)
     └── unit/                 # Layer 1, per module
@@ -374,8 +390,13 @@ transport-level exception parity between them. Not yet implemented.
 
 **Layer 3 — Protocol-level E2E.** Tests that speak actual MCP protocol to a running
 `FastMCP` server instance, backed by `FakeBackend`, catching registration/schema/
-serialization bugs unit tests can't see. Not yet implemented as a formal test suite
-(exercised manually via `fastmcp.Client` during development so far).
+serialization bugs unit tests can't see — a real bug this layer caught on its first
+day: the `adb://devices` resource function returned `list[ConnectedDevice]` (pydantic
+models) directly, which Layer 0/1 tests never exercised through fastmcp's actual
+resource-read/serialization path, so they passed while every real read of the
+resource raised `TypeError: Object of type ConnectedDevice is not JSON
+serializable`. Implemented (`tests/e2e/`), using `fastmcp.Client(mcp)` in-memory
+against a `Registry`-wired server backed by `FakeBackend`.
 
 **Layer 4 — CI emulator integration.** Runs the Layer 2 `SubprocessBackend` contract
 tests plus a smoke subset of Layer 3 against a real Android emulator in CI. Not yet
@@ -384,7 +405,8 @@ implemented.
 ## 10. CI/CD
 
 **Current status:** `.github/workflows/ci.yml` runs `ruff check` → `mypy --strict` →
-`pytest` (Layer 0 + Layer 1) on every push/PR to `main`, one Python version. That's
+`pytest` (Layer 0 + Layer 1 + Layer 3) on every push/PR to `main`, one Python
+version. That's
 the entire pipeline that exists right now.
 
 **Target shape:**

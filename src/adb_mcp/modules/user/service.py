@@ -1,14 +1,15 @@
 """Domain logic for the user module: Android user info and lifecycle on a
 connected device (`adb shell am get-current-user`, `adb shell dumpsys user`,
 `adb shell dumpsys user --user ID`, `adb shell cmd user list -v`, `adb shell am
-switch-user ID`) — relevant on multi-user devices (work profiles, guest users,
-Android Automotive), where more than one user account can exist on the same
-device.
+switch-user ID`, `adb shell pm create-user NAME`, `adb shell pm remove-user
+ID`) — relevant on multi-user devices (work profiles, guest users, Android
+Automotive), where more than one user account can exist on the same device.
 """
 
 from __future__ import annotations
 
 import re
+import shlex
 
 from pydantic import BaseModel
 
@@ -111,6 +112,39 @@ class SwitchUserResult(BaseModel):
         return f"Switched to user {self.user_id} on {self.serial}."
 
 
+class CreateUserResult(BaseModel):
+    """Outcome of creating a new Android user (`adb shell pm create-user NAME`).
+
+    Verified live, including that a name containing spaces or shell
+    metacharacters (`; echo ... `) is passed through as a literal user name,
+    not interpreted by the device's shell — the service shell-quotes it
+    before sending the command.
+    """
+
+    serial: str
+    user_id: int
+    name: str
+
+    def summary(self) -> str:
+        return f"Created user {self.user_id} ({self.name}) on {self.serial}."
+
+
+class RemoveUserResult(BaseModel):
+    """Outcome of removing an Android user (`adb shell pm remove-user USERID`).
+
+    Verified live that this fails the same way ("Error: couldn't remove user
+    id <id>", exit 1) whether the user doesn't exist or is currently the
+    active/foreground user — the message alone can't distinguish the two.
+    Switch away from a user (switch_user) before trying to remove it.
+    """
+
+    serial: str
+    user_id: int
+
+    def summary(self) -> str:
+        return f"Removed user {self.user_id} on {self.serial}."
+
+
 class UserService:
     """Reads and changes Android user state on a connected device."""
 
@@ -156,6 +190,26 @@ class UserService:
         result = await self._backend.shell(serial, f"am switch-user {user_id}")
         self._raise_for_shell_failure(serial, result)
         return SwitchUserResult(serial=serial, user_id=user_id)
+
+    async def create_user(self, serial: str, name: str) -> CreateUserResult:
+        # name is free-form and reaches the device's own shell via `adb shell`
+        # (unlike every other command here, which only ever interpolates an
+        # int) — shlex.quote it, verified live to correctly neutralize shell
+        # metacharacters rather than just happening to work for plain names.
+        result = await self._backend.shell(serial, f"pm create-user {shlex.quote(name)}")
+        self._raise_for_shell_failure(serial, result)
+        match = re.search(r"Success: created user id (\d+)", result.stdout)
+        if match is None:
+            raise BackendError(
+                result.stdout.strip() or "pm create-user succeeded but returned unexpected output.",
+                details={"serial": serial, "name": name},
+            )
+        return CreateUserResult(serial=serial, user_id=int(match.group(1)), name=name)
+
+    async def remove_user(self, serial: str, user_id: int) -> RemoveUserResult:
+        result = await self._backend.shell(serial, f"pm remove-user {user_id}")
+        self._raise_for_shell_failure(serial, result)
+        return RemoveUserResult(serial=serial, user_id=user_id)
 
 
 # One line of `adb shell cmd user list -v`, e.g.:

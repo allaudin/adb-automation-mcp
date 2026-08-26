@@ -8,8 +8,7 @@ Env vars read at startup:
     ADB_MCP_ADB_PATH           explicit path to the adb binary (falls back to PATH lookup)
     ADB_MCP_TIMEOUT_S          per-command timeout in seconds (default: 10)
     ADB_MCP_ALLOW_DESTRUCTIVE=1  flip the default policy posture to also allow destructive
-                                 tools — no destructive tools exist yet, so this currently
-                                 has no effect
+                                 tools (e.g. remove_user); denied by default
 """
 
 from __future__ import annotations

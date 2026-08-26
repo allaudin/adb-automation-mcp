@@ -27,9 +27,9 @@ from adb_mcp.policy import PolicyConfig, PolicyEngine
 from adb_mcp.registry import Registry, discover_modules
 
 
-def _build_test_server(backend: FakeBackend) -> FastMCP:
+def _build_test_server(backend: FakeBackend, *, allow_destructive: bool = False) -> FastMCP:
     manifests = discover_modules()
-    registry = Registry(policy=PolicyEngine(PolicyConfig()))
+    registry = Registry(policy=PolicyEngine(PolicyConfig(allow_destructive=allow_destructive)))
 
     @asynccontextmanager
     async def lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
@@ -187,3 +187,39 @@ async def test_switch_user_tool_round_trips_over_mcp_protocol() -> None:
     assert result.data.status == "success"
     assert result.data.data.serial == "emulator-5554"
     assert result.data.data.user_id == 0
+
+
+@pytest.mark.asyncio
+async def test_create_user_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("create_user", {"serial": "emulator-5554", "name": "Guest"})
+
+    assert result.data.status == "success"
+    assert result.data.data.serial == "emulator-5554"
+    assert result.data.data.user_id == 12
+    assert result.data.data.name == "Guest"
+
+
+@pytest.mark.asyncio
+async def test_remove_user_tool_round_trips_over_mcp_protocol() -> None:
+    # destructive category: only registered when the server explicitly opts in.
+    mcp = _build_test_server(FakeBackend(), allow_destructive=True)
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("remove_user", {"serial": "emulator-5554", "user_id": 12})
+
+    assert result.data.status == "success"
+    assert result.data.data.serial == "emulator-5554"
+    assert result.data.data.user_id == 12
+
+
+@pytest.mark.asyncio
+async def test_remove_user_tool_not_registered_when_destructive_disallowed() -> None:
+    mcp = _build_test_server(FakeBackend(), allow_destructive=False)
+
+    async with Client(mcp) as client:
+        tools = await client.list_tools()
+
+    assert "remove_user" not in {tool.name for tool in tools}

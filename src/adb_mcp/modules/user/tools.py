@@ -11,7 +11,9 @@ from typing import cast
 from fastmcp import Context
 
 from adb_mcp.modules.user.service import (
+    CreateUserResult,
     CurrentUser,
+    RemoveUserResult,
     SwitchUserResult,
     UserDump,
     UserInfo,
@@ -240,3 +242,89 @@ async def switch_user(ctx: Context, serial: str, user_id: int) -> SwitchUserResu
     services = cast("dict[str, object]", ctx.lifespan_context["services"])
     user = cast(UserService, services["user"])
     return await user.switch_user(serial, user_id)
+
+
+@category("write")
+async def create_user(ctx: Context, serial: str, name: str) -> CreateUserResult:
+    """Create a full secondary Android user on a device: `adb shell pm create-user NAME`.
+
+    Creates the user only — it does not switch to it (use switch_user
+    separately if that's the goal). name is shell-quoted before being sent to
+    the device, verified live to handle spaces and shell metacharacters
+    safely.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+        name: Display name for the new user. Can contain spaces.
+
+    Returns:
+        The serial, the newly assigned user_id, and the name requested.
+
+    Error handling:
+        Propagates the same way most tools do (unlike check_adb_available): if
+        the adb binary itself can't be found or is unresponsive, or the
+        serial doesn't match a connected device, that surfaces as an actual
+        tool error. Only the unreachable-serial failure path was verified
+        live for this specific command — other real failure modes (e.g. a
+        device's max-user-count limit) haven't been triggered and observed,
+        so they'll surface as a generic backend error rather than a more
+        specific one.
+
+    Example:
+        Called with serial="emulator-5554", name="Guest". A typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "Created user 12 (Guest) on emulator-5554.",
+          "data": {"serial": "emulator-5554", "user_id": 12, "name": "Guest"},
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    user = cast(UserService, services["user"])
+    return await user.create_user(serial, name)
+
+
+@category("destructive")
+async def remove_user(ctx: Context, serial: str, user_id: int) -> RemoveUserResult:
+    """Delete an Android user/profile from a device: `adb shell pm remove-user ID`.
+
+    Irreversibly deletes the user and all of its data — destructive, and
+    denied by policy unless the server is explicitly configured with
+    ADB_MCP_ALLOW_DESTRUCTIVE=1. Verified live that this also fails (not just
+    for a nonexistent user) if user_id is the device's current/foreground
+    user — switch_user away from it first.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+        user_id: The Android user ID to remove (see list_users).
+
+    Returns:
+        The serial and user_id removed.
+
+    Error handling:
+        Propagates the same way most tools do (unlike check_adb_available): if
+        the adb binary itself can't be found or is unresponsive, or the
+        serial doesn't match a connected device, that surfaces as an actual
+        tool error. Verified live that removal failure — whether user_id
+        doesn't exist or is currently active — always reads "Error: couldn't
+        remove user id <id>", exit code 1; adb doesn't distinguish the two
+        reasons in the message, so neither does this tool.
+
+    Example:
+        Called with serial="emulator-5554", user_id=12. A typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "Removed user 12 on emulator-5554.",
+          "data": {"serial": "emulator-5554", "user_id": 12},
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    user = cast(UserService, services["user"])
+    return await user.remove_user(serial, user_id)

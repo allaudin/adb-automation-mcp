@@ -15,7 +15,9 @@ from adb_mcp.errors import (
     UserNotFoundError,
 )
 from adb_mcp.modules.user.service import (
+    CreateUserResult,
     CurrentUser,
+    RemoveUserResult,
     SwitchUserResult,
     UserDump,
     UserInfo,
@@ -333,4 +335,125 @@ async def test_switch_user__adb_unavailable_propagates_as_error() -> None:
 def test_switch_user_result_summary_mentions_user_id() -> None:
     summary = SwitchUserResult(serial="emulator-5554", user_id=0).summary()
     assert "0" in summary
+    assert "emulator-5554" in summary
+
+
+@pytest.mark.asyncio
+async def test_create_user__success_parses_new_user_id() -> None:
+    service = UserService(FakeBackend())
+
+    result = await service.create_user("emulator-5554", "Guest")
+
+    assert result.serial == "emulator-5554"
+    assert result.user_id == 12
+    assert result.name == "Guest"
+
+
+@pytest.mark.asyncio
+async def test_create_user__shell_quotes_name_with_metacharacters() -> None:
+    captured: dict[str, str] = {}
+
+    class RecordingBackend(FakeBackend):
+        async def shell(self, serial: str, command: str) -> CommandResult:
+            captured["command"] = command
+            return await super().shell(serial, command)
+
+    service = UserService(RecordingBackend())
+
+    await service.create_user("emulator-5554", "; echo pwned; #")
+
+    assert "command" in captured
+    assert captured["command"] == "pm create-user '; echo pwned; #'"
+
+
+@pytest.mark.asyncio
+async def test_create_user__unexpected_output_raises_backend_error() -> None:
+    backend = FakeBackend(
+        create_user_result=CommandResult(
+            stdout="Error: could not create user\n", stderr="", exit_code=0, duration_ms=100.0
+        )
+    )
+    service = UserService(backend)
+
+    with pytest.raises(BackendError):
+        await service.create_user("emulator-5554", "Guest")
+
+
+@pytest.mark.asyncio
+async def test_create_user__unknown_serial_raises_device_not_found() -> None:
+    backend = FakeBackend(
+        create_user_result=CommandResult(
+            stdout="", stderr="adb: device 'bogus' not found\n", exit_code=1, duration_ms=10.0
+        )
+    )
+    service = UserService(backend)
+
+    with pytest.raises(DeviceNotFoundError):
+        await service.create_user("bogus", "Guest")
+
+
+@pytest.mark.asyncio
+async def test_create_user__adb_unavailable_propagates_as_error() -> None:
+    service = UserService(FakeBackend(unavailable=True))
+
+    with pytest.raises(AdbUnavailableError):
+        await service.create_user("emulator-5554", "Guest")
+
+
+def test_create_user_result_summary_mentions_id_and_name() -> None:
+    summary = CreateUserResult(serial="emulator-5554", user_id=12, name="Guest").summary()
+    assert "12" in summary
+    assert "Guest" in summary
+    assert "emulator-5554" in summary
+
+
+@pytest.mark.asyncio
+async def test_remove_user__success_returns_serial_and_user_id() -> None:
+    service = UserService(FakeBackend())
+
+    result = await service.remove_user("emulator-5554", 12)
+
+    assert result.serial == "emulator-5554"
+    assert result.user_id == 12
+
+
+@pytest.mark.asyncio
+async def test_remove_user__nonexistent_or_active_user_raises_backend_error() -> None:
+    # Real adb behavior, verified live: exit 1, "Error: couldn't remove user
+    # id <id>" — identical whether the user doesn't exist or is currently active.
+    backend = FakeBackend(
+        remove_user_result=CommandResult(
+            stdout="", stderr="Error: couldn't remove user id 9999", exit_code=1, duration_ms=80.0
+        )
+    )
+    service = UserService(backend)
+
+    with pytest.raises(BackendError):
+        await service.remove_user("emulator-5554", 9999)
+
+
+@pytest.mark.asyncio
+async def test_remove_user__unknown_serial_raises_device_not_found() -> None:
+    backend = FakeBackend(
+        remove_user_result=CommandResult(
+            stdout="", stderr="adb: device 'bogus' not found\n", exit_code=1, duration_ms=10.0
+        )
+    )
+    service = UserService(backend)
+
+    with pytest.raises(DeviceNotFoundError):
+        await service.remove_user("bogus", 12)
+
+
+@pytest.mark.asyncio
+async def test_remove_user__adb_unavailable_propagates_as_error() -> None:
+    service = UserService(FakeBackend(unavailable=True))
+
+    with pytest.raises(AdbUnavailableError):
+        await service.remove_user("emulator-5554", 12)
+
+
+def test_remove_user_result_summary_mentions_user_id() -> None:
+    summary = RemoveUserResult(serial="emulator-5554", user_id=12).summary()
+    assert "12" in summary
     assert "emulator-5554" in summary

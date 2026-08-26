@@ -30,6 +30,8 @@ class FakeBackend:
         user_info_result: CommandResult | None = None,
         list_users_result: CommandResult | None = None,
         switch_user_result: CommandResult | None = None,
+        create_user_result: CommandResult | None = None,
+        remove_user_result: CommandResult | None = None,
     ) -> None:
         self._devices = devices or []
         self._unavailable = unavailable
@@ -94,6 +96,14 @@ class FakeBackend:
         self._switch_user_result = switch_user_result or CommandResult(
             stdout="", stderr="", exit_code=0, duration_ms=100.0
         )
+        # Real `adb shell pm create-user NAME` success output, captured from an actual run.
+        self._create_user_result = create_user_result or CommandResult(
+            stdout="Success: created user id 12\n", stderr="", exit_code=0, duration_ms=400.0
+        )
+        # Real `adb shell pm remove-user ID` success output, captured from an actual run.
+        self._remove_user_result = remove_user_result or CommandResult(
+            stdout="Success: removed user\n", stderr="", exit_code=0, duration_ms=350.0
+        )
 
     def _raise_if_unavailable(self) -> None:
         if self._unavailable:
@@ -131,6 +141,10 @@ class FakeBackend:
             return self._list_users_result
         if command.startswith("am switch-user "):
             return self._switch_user_result
+        if command.startswith("pm create-user "):
+            return self._create_user_result
+        if command.startswith("pm remove-user "):
+            return self._remove_user_result
         return self._shell_result
 
     async def install(self, serial: str, apk_path: str, flags: list[str]) -> CommandResult:

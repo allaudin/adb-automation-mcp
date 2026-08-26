@@ -12,12 +12,14 @@ An MCP server that exposes Android Debug Bridge (ADB) capabilities to MCP client
 (readable state).
 
 **Goals:**
+
 - Every behavior is verifiable without a physical device or emulator.
 - New command domains can be added as plugins, by third parties, without forking.
 - Operable like a real open-source project: semantic versioning, automated releases,
   documented architecture, a PR workflow contributors can actually follow.
 
 **Non-goals (v1):**
+
 - A pure-Python re-implementation of the ADB wire protocol.
 - Multi-transport MCP support (HTTP/SSE) — ships `stdio` only.
 - A generic "run arbitrary shell command" tool in core.
@@ -181,6 +183,7 @@ delegates essentially immediately to the service, and is tagged with
 ### Registry
 
 The central wiring component (`registry.py`). It:
+
 - discovers module manifests via `entry_points`,
 - asks the `PolicyEngine` whether each declared tool is allowed, at registration time,
 - wraps allowed tools with the response-envelope translator,

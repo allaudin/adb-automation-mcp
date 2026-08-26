@@ -52,6 +52,7 @@ nav:
       - ui: reference/ui.md
   - Integrations:
       - Claude Code: integrations/claude-code.md
+      - AI-Assisted Install: integrations/ai-assisted-install.md
 
 theme:
   name: material

@@ -8,7 +8,7 @@
 An MCP server exposing Android Debug Bridge (ADB) capabilities as typed, documented
 tools and resources.
 
-**Full documentation: <https://allaudin.github.io/adb-mcp-server/>** — architecture,
+**[Full documentation](https://allaudin.github.io/adb-mcp-server/)** — architecture,
 decision log, per-tool reference, and client integration guides.
 
 ## Install
@@ -27,9 +27,42 @@ uv run adb-mcp-server
 ```
 
 Talks to the `adb` binary on `PATH` by default. For real-device setup, the fake
-backend, environment variables, the full tool list, and integrating with an MCP
-client (Claude Code, Claude Desktop, ...), see the
-[docs site](https://allaudin.github.io/adb-mcp-server/).
+backend, the full tool list, and per-client integration guides (Claude Code, Claude
+Desktop, ...), see the [docs site](https://allaudin.github.io/adb-mcp-server/).
+
+## MCP client configuration
+
+Add this to your client's `mcp.json` (e.g. Claude Desktop's config, or a Claude Code
+project's `.mcp.json`). Every real-device env var is shown below — all are optional,
+see the [full reference](https://allaudin.github.io/adb-mcp-server/#running-it) for
+defaults and details (including `ADB_MCP_BACKEND`, a testing-only switch to the fake
+in-memory backend, not something a real client config needs):
+
+```json
+{
+  "mcpServers": {
+    "adb-mcp-server": {
+      "command": "uvx",
+      "args": ["android-adb-mcp"],
+      "env": {
+        "ADB_MCP_ADB_PATH": "/path/to/platform-tools/adb",
+        "ADB_MCP_TIMEOUT_S": "10",
+        "ADB_MCP_ALLOW_DESTRUCTIVE": "1",
+        "ADB_MCP_LOCAL_ROOT": "/path/to/local/root"
+      }
+    }
+  }
+}
+```
+
+- `ADB_MCP_ADB_PATH` — explicit path to the `adb` binary; MCP clients usually launch
+  the server with a minimal environment that doesn't include your shell's `PATH`
+  customizations, so set this explicitly rather than relying on `PATH` resolution
+- `ADB_MCP_TIMEOUT_S` — per-command timeout in seconds
+- `ADB_MCP_ALLOW_DESTRUCTIVE=1` — allow `destructive`-category tools (e.g.
+  `remove_user`); denied by default
+- `ADB_MCP_LOCAL_ROOT` — host directory `pull_file`'s/`stop_log_session`'s local path
+  must resolve inside; unset means those tools refuse to write anywhere
 
 ## Testing
 

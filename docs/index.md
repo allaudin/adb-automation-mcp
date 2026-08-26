@@ -1,4 +1,4 @@
-# adb-mcp-server
+# android-adb-mcp
 
 An MCP server exposing Android Debug Bridge (ADB) capabilities as typed, documented
 tools and resources. See [Architecture](ARCHITECTURE.md) for how the system is put

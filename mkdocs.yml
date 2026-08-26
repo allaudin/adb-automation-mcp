@@ -1,4 +1,4 @@
-site_name: adb-mcp-server
+site_name: android-adb-mcp
 site_description: MCP server exposing Android Debug Bridge (ADB) capabilities as typed, documented tools and resources.
 site_url: https://allaudin.github.io/adb-mcp-server/
 repo_url: https://github.com/allaudin/adb-mcp-server

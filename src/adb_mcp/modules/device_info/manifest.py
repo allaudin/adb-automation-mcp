@@ -13,7 +13,7 @@ MODULE = ModuleManifest(
     name="device_info",
     service_factory=DeviceInfoService,
     tools=[list_connected_devices],
-    # No resources currently: adb://devices started life as one (ADR-002) but
+    # No resources currently: adb://devices started life as one but
     # shipped as the list_connected_devices tool above instead, since not every
     # MCP client surfaces resources to the model as readily as tools (confirmed:
     # Claude Desktop couldn't read it, Claude Code could). Registry.register_resources

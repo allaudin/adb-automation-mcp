@@ -1,8 +1,7 @@
 # ADB MCP Server — Architecture
 
 This describes the system as it currently stands: what exists, how a process boots,
-and how the pieces work together. It does not explain *why* things are shaped this
-way — for that, see `ADR.md`, the decision log.
+and how the pieces work together.
 
 Last updated: 2026-08-25
 
@@ -31,10 +30,10 @@ An MCP server that exposes Android Debug Bridge (ADB) capabilities to MCP client
 `connect_device`, `disconnect_device`). It passes `mypy --strict`, `ruff`,
 `pytest`, and has been verified end-to-end through a real `fastmcp` `Client`
 call (and, for `restart_adb_server`/`connect_device`/`disconnect_device`'s
-failure paths, against a real adb install — see ADR-016, ADR-017). CI
+failure paths, against a real adb install). CI
 (`.github/workflows/ci.yml`) runs lint, type-check, and tests on every push/PR to
-`main`, plus a strict `mkdocs build` and (on merge to `main`) a GitHub Pages deploy
-(ADR-013). Everything else described below — additional modules, release automation,
+`main`, plus a strict `mkdocs build` and (on merge to `main`) a GitHub Pages deploy.
+Everything else described below — additional modules, release automation,
 emulator integration — is the target shape, not yet built.
 
 ## 2. Component Architecture
@@ -313,16 +312,16 @@ Heuristic applied consistently across modules:
 Every resource is implicitly category `read`. Tools are tagged individually — the
 category is what the policy layer filters on. `Registry.register_resources` wires
 manifest resources into FastMCP via `mcp.resource(uri)`, wrapped by
-`wrap_resource` (ADR-011's lighter-weight, envelope-free error handling) rather
+`wrap_resource` (a lighter-weight, envelope-free error handling path) rather
 than `wrap_with_envelope` — implemented and exercised (`tests/unit/test_registry.py`,
 `tests/e2e/`'s `register_resources` call), but no module currently registers a
 resource through it.
 
-ADR-002 originally called for an `adb://devices` resource; it shipped instead as
+`adb://devices` was originally planned as a resource; it shipped instead as
 the `list_connected_devices` tool in the `device_info` module (kept out of
 `diagnostics`, which only reports on adb-connection health and never mutates
 anything — introspecting individual devices, restarting the server, or connecting
-to one over TCP each belong to a different module, per ADR-016/ADR-017).
+to one over TCP each belong to a different module).
 Reason: not every MCP client surfaces resources to the model as readily as it
 surfaces tools — confirmed directly, `adb://devices` worked when read from Claude
 Code but Claude Desktop couldn't read it at all. The tool form is the safe default
@@ -336,12 +335,11 @@ genuinely matter more than universal client support.
 adb-mcp-server/
 ├── pyproject.toml
 ├── uv.lock
-├── mkdocs.yml                # docs site config — nav, theme, mkdocstrings (ADR-013)
+├── mkdocs.yml                # docs site config — nav, theme, mkdocstrings
 ├── README.md                 # short pitch + link to the docs site; not the manual
 ├── docs/                     # docs_dir for mkdocs — served at the Pages URL
 │   ├── index.md              # docs site home page (the old README content lives here)
 │   ├── ARCHITECTURE.md       # this file — current-state description
-│   ├── ADR.md                # decision log — the "why"
 │   ├── reference/            # one page per module, mkdocstrings-generated from tools.py
 │   └── integrations/         # per-MCP-client setup guides
 ├── LICENSE
@@ -459,4 +457,4 @@ standalone `docs.yml`.
 ---
 
 *Living documentation — sections are updated in place as the system changes, not
-appended to. For the reasoning behind any of the above, see `ADR.md`.*
+appended to.*

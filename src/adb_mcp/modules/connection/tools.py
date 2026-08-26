@@ -48,15 +48,17 @@ async def restart_adb_server(ctx: Context) -> AdbServerRestartResult:
     Example:
         Called with no arguments. A typical response:
 
+        ```json
         {
           "status": "success",
           "message": "adb server restarted successfully.",
           "data": {
             "success": true,
-            "output": "* daemon not running; starting now at tcp:5037\n* daemon started successfully"
+            "output": "* daemon not running; starting now at tcp:5037\\n* daemon started successfully"
           },
           "error": null
         }
+        ```
     """
     services = cast("dict[str, object]", ctx.lifespan_context["services"])
     connection = cast(ConnectionService, services["connection"])
@@ -82,8 +84,7 @@ async def connect_device(ctx: Context, host: str, port: int = 5555) -> ConnectRe
         the message text ("connected to ..." / "already connected to ..." vs
         "failed to connect to ..."), not the exit code — adb's connect
         subcommand exits 0 whether or not the connection actually succeeded
-        (verified live; see ADR-017), so the exit code alone can't tell you
-        anything here.
+        (verified live), so the exit code alone can't tell you anything here.
 
     Error handling:
         Propagates the same way most tools do (unlike check_adb_available): if
@@ -93,6 +94,7 @@ async def connect_device(ctx: Context, host: str, port: int = 5555) -> ConnectRe
     Example:
         Called with host="192.168.1.50". A typical response:
 
+        ```json
         {
           "status": "success",
           "message": "Connected to 192.168.1.50:5555.",
@@ -103,6 +105,7 @@ async def connect_device(ctx: Context, host: str, port: int = 5555) -> ConnectRe
           },
           "error": null
         }
+        ```
     """
     services = cast("dict[str, object]", ctx.lifespan_context["services"])
     connection = cast(ConnectionService, services["connection"])
@@ -126,7 +129,7 @@ async def disconnect_device(ctx: Context, host: str, port: int = 5555) -> Discon
         address targeted, and adb's raw output. Unlike connect_device, this is
         judged on the exit code — adb disconnect's exit code was verified live
         to be reliable (1 with "error: no such device" for an address that
-        isn't connected; see ADR-017).
+        isn't connected).
 
     Error handling:
         Propagates the same way most tools do (unlike check_adb_available): if
@@ -136,6 +139,7 @@ async def disconnect_device(ctx: Context, host: str, port: int = 5555) -> Discon
     Example:
         Called with host="192.168.1.50". A typical response:
 
+        ```json
         {
           "status": "success",
           "message": "Disconnected from 192.168.1.50:5555.",
@@ -146,6 +150,7 @@ async def disconnect_device(ctx: Context, host: str, port: int = 5555) -> Discon
           },
           "error": null
         }
+        ```
     """
     services = cast("dict[str, object]", ctx.lifespan_context["services"])
     connection = cast(ConnectionService, services["connection"])

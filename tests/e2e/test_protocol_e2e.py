@@ -1,4 +1,4 @@
-"""Layer 3 protocol-level E2E tests (ADR-004/ARCHITECTURE.md §9): a real
+"""Layer 3 protocol-level E2E tests (see ARCHITECTURE.md §9): a real
 fastmcp.Client speaking actual MCP protocol to a running FastMCP server instance,
 backed by FakeBackend. This is the layer that catches registration/schema/
 serialization bugs unit tests can't see, because neither Layer 0 (typing +

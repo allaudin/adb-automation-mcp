@@ -8,9 +8,7 @@ edit_uri: edit/main/docs/
 docs_dir: docs
 site_dir: site
 
-# ADR.md is a developer-facing decision log kept in docs/ for its
-# cross-references from ARCHITECTURE.md, but it isn't meant for the public
-# site — excluded from the build, not just the nav.
+# Internal-only file, not part of the public site.
 exclude_docs: |
   ADR.md
 
@@ -47,7 +45,13 @@ theme:
 markdown_extensions:
   - admonition
   - pymdownx.details
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      # Required for Material to render ```mermaid fences as actual diagrams
+      # instead of plain code blocks — ARCHITECTURE.md has 7 of them.
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.highlight
   - tables
   - toc:
@@ -65,9 +69,15 @@ plugins:
             merge_init_into_class: true
             show_signature_annotations: true
             docstring_options:
-              # This project's docstrings (ADR-012) are deliberately narrative
+              # This project's docstrings are deliberately narrative
               # prose, tuned for LLM/human readability — not griffe's stricter
               # "ExceptionType: description" structured Raises/Returns items.
               # Suppress griffe's parsing warnings rather than reshaping the
               # docstring convention around one tool's parser.
               warnings: false
+              # Every tool here returns exactly one value, documented as a
+              # single flush-left paragraph (no hanging indent). Without this,
+              # griffe treats each physical line of that paragraph as a
+              # separate "Returns" item, rendering as one bogus table row per
+              # line instead of one row for the whole description.
+              returns_multiple_items: false

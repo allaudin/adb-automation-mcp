@@ -35,12 +35,14 @@ async def check_adb_available(ctx: Context) -> AdbAvailability:
     Example:
         Called with no arguments. A typical response:
 
+        ```json
         {
           "status": "success",
           "message": "adb is available (1 device connected).",
           "data": {"available": true, "device_count": 1, "reason": null},
           "error": null
         }
+        ```
     """
     services = cast("dict[str, object]", ctx.lifespan_context["services"])
     diagnostics = cast(DiagnosticsService, services["diagnostics"])

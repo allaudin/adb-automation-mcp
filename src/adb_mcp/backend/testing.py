@@ -32,7 +32,7 @@ class FakeBackend:
             stdout="", stderr="", exit_code=0, duration_ms=5.0
         )
         # Real `adb start-server` output when a server needs starting, captured
-        # from an actual run — see ADR-014 on why fixtures must be real-shaped.
+        # from an actual run — fixtures should be real-shaped, not hand-invented.
         self._start_server_result = start_server_result or CommandResult(
             stdout="",
             stderr="* daemon not running; starting now at tcp:5037\n* daemon started successfully\n",

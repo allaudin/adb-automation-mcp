@@ -139,7 +139,7 @@ def wrap_resource(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[
     """Converts a plain resource function (returns data, raises AdbError) into one
     that raises fastmcp's ResourceError on failure instead.
 
-    Deliberately lighter-weight than wrap_with_envelope (ADR-011): a resource read
+    Deliberately lighter-weight than wrap_with_envelope: a resource read
     either returns its content directly or fails with a plain-text message — no
     ToolResponse envelope, since there's no "data vs error" branch for a client to
     switch on the way there is for a tool call result.

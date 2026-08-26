@@ -4,9 +4,8 @@
 exercised by modules built so far (diagnostics, device_info, connection); `shell`,
 `install`, `uninstall`, `push`, and `pull` are implemented to the same standard but
 not yet used by any module. None of these have automated contract-test coverage
-against the real binary yet (ADR-004's Layer 2 is not yet implemented) — verified
-manually against a real device for kill_server/start_server (ADR-016) and for
-connect/disconnect (ADR-017).
+against the real binary yet — verified manually against a real device for
+kill_server/start_server and for connect/disconnect instead.
 """
 
 from __future__ import annotations

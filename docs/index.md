@@ -2,9 +2,7 @@
 
 An MCP server exposing Android Debug Bridge (ADB) capabilities as typed, documented
 tools and resources. See [Architecture](ARCHITECTURE.md) for how the system is put
-together. The decision log behind *why* it's built that way lives in
-[`docs/ADR.md`](https://github.com/allaudin/adb-mcp-server/blob/main/docs/ADR.md) in
-the repo — a developer-facing record, not published on this site.
+together.
 
 ## Requirements
 

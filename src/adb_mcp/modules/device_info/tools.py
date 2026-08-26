@@ -27,6 +27,7 @@ async def list_connected_devices(ctx: Context) -> list[ConnectedDevice]:
     Example:
         Called with no arguments. A typical response:
 
+        ```json
         {
           "status": "success",
           "message": "list_connected_devices completed successfully.",
@@ -35,6 +36,7 @@ async def list_connected_devices(ctx: Context) -> list[ConnectedDevice]:
           ],
           "error": null
         }
+        ```
     """
     services = cast("dict[str, object]", ctx.lifespan_context["services"])
     device_info = cast(DeviceInfoService, services["device_info"])

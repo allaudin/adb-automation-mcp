@@ -30,6 +30,14 @@ Talks to the `adb` binary on `PATH` by default. For real-device setup, the fake
 backend, the full tool list, and per-client integration guides (Claude Code, Claude
 Desktop, ...), see the [docs site](https://allaudin.github.io/adb-mcp-server/).
 
+## Installation prompt
+
+Prefer not to configure this by hand? Hand the
+[AI-assisted install prompt](https://allaudin.github.io/adb-mcp-server/integrations/ai-assisted-install/)
+to an AI coding assistant that can run shell commands and edit MCP config (Claude
+Code, GitHub Copilot in agent mode, ...) — it detects/installs `uv`, resolves `adb`'s
+absolute path, and registers this server for you.
+
 ## MCP client configuration
 
 Add this to your client's `mcp.json` (e.g. Claude Desktop's config, or a Claude Code
@@ -61,8 +69,9 @@ in-memory backend, not something a real client config needs):
 - `ADB_MCP_TIMEOUT_S` — per-command timeout in seconds
 - `ADB_MCP_ALLOW_DESTRUCTIVE=1` — allow `destructive`-category tools (e.g.
   `remove_user`); denied by default
-- `ADB_MCP_LOCAL_ROOT` — host directory `pull_file`'s/`stop_log_session`'s local path
-  must resolve inside; unset means those tools refuse to write anywhere
+- `ADB_MCP_LOCAL_ROOT` — the folder on this machine where file-saving tools
+  (`pull_file`, `take_screenshot`, `stop_log_session`) are allowed to write; unset
+  means those tools refuse to write anywhere
 
 ## Testing
 

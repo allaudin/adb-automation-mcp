@@ -26,13 +26,14 @@ An MCP server that exposes Android Debug Bridge (ADB) capabilities to MCP client
 - Per-user or per-identity RBAC. The policy layer governs which tools exist at all on
   a given server instance, not who is calling it.
 
-**Current implementation status (2026-08-26):** four modules exist under
+**Current implementation status (2026-08-26):** five modules exist under
 `src/adb_mcp/modules/`: `diagnostics` (`check_adb_available`), `device_info`
 (`list_connected_devices`), `connection` (`restart_adb_server`,
-`connect_device`, `disconnect_device`), and `user` (`get_current_user`,
+`connect_device`, `disconnect_device`), `user` (`get_current_user`,
 `dump_user`, `user_info`, `list_users`, `switch_user`, `create_user`,
-`remove_user` — see the Tool Reference site for exactly what each `adb shell`
-command is and its verified quirks).
+`remove_user`), and `logger` (`read_logs`, `clear_logs`,
+`get_log_buffer_size`, `read_package_logs` — see the Tool Reference site for
+exactly what each `adb shell` command is and its verified quirks).
 It passes `mypy --strict`, `ruff`,
 `pytest`, and has been verified
 end-to-end through a real `fastmcp` `Client` call, including against a real
@@ -54,12 +55,14 @@ graph TB
     Registry --> ModDevices["device_info module"]
     Registry --> ModConn["connection module"]
     Registry --> ModUser["user module"]
+    Registry --> ModLogger["logger module"]
     Registry -.-> ModExt["3rd-party module<br/>(separate PyPI package)"]
 
     ModDiag --> Backend["AdbBackend<br/>(Protocol)"]
     ModDevices --> Backend
     ModConn --> Backend
     ModUser --> Backend
+    ModLogger --> Backend
     ModExt -.-> Backend
 
     Backend --> Sub["SubprocessBackend<br/>(production)"]

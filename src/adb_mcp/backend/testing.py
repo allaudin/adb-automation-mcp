@@ -32,6 +32,11 @@ class FakeBackend:
         switch_user_result: CommandResult | None = None,
         create_user_result: CommandResult | None = None,
         remove_user_result: CommandResult | None = None,
+        read_logs_result: CommandResult | None = None,
+        clear_logs_result: CommandResult | None = None,
+        get_log_buffer_size_result: CommandResult | None = None,
+        pidof_result: CommandResult | None = None,
+        package_logs_result: CommandResult | None = None,
     ) -> None:
         self._devices = devices or []
         self._unavailable = unavailable
@@ -104,6 +109,54 @@ class FakeBackend:
         self._remove_user_result = remove_user_result or CommandResult(
             stdout="Success: removed user\n", stderr="", exit_code=0, duration_ms=350.0
         )
+        # Real `adb shell logcat -d -v threadtime -t N -b main` output, captured
+        # from an actual run (trimmed).
+        self._read_logs_result = read_logs_result or CommandResult(
+            stdout=(
+                "--------- beginning of main\n"
+                "08-26 08:24:26.364   462 11426 E audio_hw_generic_caremu: "
+                "mixer_thread_loop error[-1] writing data to pcm\n"
+                "08-26 08:24:26.364   462 19519 W audio_hw_generic_caremu: "
+                "Not supplying enough data to HAL, expected position 445268478 , only wrote 445264560\n"
+                "08-26 08:24:26.374 19797 19820 D EmulatedVehicleHardware: "
+                "Set value for property ID: 290459441\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=80.0,
+        )
+        # Real `adb shell logcat -c -b main` success output: empty stdout, exit 0.
+        self._clear_logs_result = clear_logs_result or CommandResult(
+            stdout="", stderr="", exit_code=0, duration_ms=60.0
+        )
+        # Real `adb shell logcat -g -b main` output, captured from an actual run.
+        self._get_log_buffer_size_result = get_log_buffer_size_result or CommandResult(
+            stdout=(
+                "main: ring buffer is 2 MiB (1 MiB consumed, 26 MiB readable), "
+                "max entry is 5120 B, max payload is 4068 B\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=20.0,
+        )
+        # Real `adb shell pidof -s PACKAGE` success output for a running package.
+        self._pidof_result = pidof_result or CommandResult(
+            stdout="19861\n", stderr="", exit_code=0, duration_ms=30.0
+        )
+        # Real `adb shell logcat -d -v threadtime -t N -b main --pid=PID` output,
+        # captured from an actual run (trimmed).
+        self._package_logs_result = package_logs_result or CommandResult(
+            stdout=(
+                "--------- beginning of main\n"
+                "08-26 08:24:32.118   725  1221 D WifiNetworkSelector: "
+                "About to run SavedNetworkNominator :\n"
+                "08-26 08:24:32.119   725  1221 V WifiLastResortWatchdog: "
+                "updateAvailableNetworks: size = 0\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=70.0,
+        )
 
     def _raise_if_unavailable(self) -> None:
         if self._unavailable:
@@ -145,6 +198,16 @@ class FakeBackend:
             return self._create_user_result
         if command.startswith("pm remove-user "):
             return self._remove_user_result
+        if command.startswith("logcat -d ") and "--pid=" in command:
+            return self._package_logs_result
+        if command.startswith("logcat -d "):
+            return self._read_logs_result
+        if command.startswith("logcat -c "):
+            return self._clear_logs_result
+        if command.startswith("logcat -g "):
+            return self._get_log_buffer_size_result
+        if command.startswith("pidof -s "):
+            return self._pidof_result
         return self._shell_result
 
     async def install(self, serial: str, apk_path: str, flags: list[str]) -> CommandResult:

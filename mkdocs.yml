@@ -25,6 +25,7 @@ nav:
       - device_info: reference/device_info.md
       - connection: reference/connection.md
       - user: reference/user.md
+      - logger: reference/logger.md
   - Integrations:
       - Claude Code: integrations/claude-code.md
 

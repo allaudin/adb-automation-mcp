@@ -19,6 +19,7 @@ diagnostics = "adb_mcp.modules.diagnostics.manifest:MODULE"
 device_info = "adb_mcp.modules.device_info.manifest:MODULE"
 connection = "adb_mcp.modules.connection.manifest:MODULE"
 user = "adb_mcp.modules.user.manifest:MODULE"
+logger = "adb_mcp.modules.logger.manifest:MODULE"
 
 [dependency-groups]
 dev = [

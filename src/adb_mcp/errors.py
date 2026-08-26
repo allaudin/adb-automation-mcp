@@ -47,6 +47,15 @@ class UserNotFoundError(AdbError):
     code = "USER_NOT_FOUND"
 
 
+class PackageNotRunningError(AdbError):
+    """The device is reachable, but no running process was found for the
+    requested package — `pidof` doesn't distinguish "not installed" from
+    "installed but not currently running", so neither does this.
+    """
+
+    code = "PACKAGE_NOT_RUNNING"
+
+
 class AmbiguousDeviceError(AdbError):
     """A serial was omitted but more than one device is connected."""
 

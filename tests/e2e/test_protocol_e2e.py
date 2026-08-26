@@ -223,3 +223,55 @@ async def test_remove_user_tool_not_registered_when_destructive_disallowed() -> 
         tools = await client.list_tools()
 
     assert "remove_user" not in {tool.name for tool in tools}
+
+
+@pytest.mark.asyncio
+async def test_read_logs_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("read_logs", {"serial": "emulator-5554"})
+
+    assert result.data.status == "success"
+    assert result.data.data.serial == "emulator-5554"
+    assert result.data.data.buffer == "main"
+    assert "beginning of main" in result.data.data.output
+
+
+@pytest.mark.asyncio
+async def test_clear_logs_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("clear_logs", {"serial": "emulator-5554"})
+
+    assert result.data.status == "success"
+    assert result.data.data.serial == "emulator-5554"
+    assert result.data.data.buffer == "main"
+
+
+@pytest.mark.asyncio
+async def test_get_log_buffer_size_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("get_log_buffer_size", {"serial": "emulator-5554"})
+
+    assert result.data.status == "success"
+    assert result.data.data.serial == "emulator-5554"
+    assert "ring buffer" in result.data.data.output
+
+
+@pytest.mark.asyncio
+async def test_read_package_logs_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "read_package_logs", {"serial": "emulator-5554", "package": "com.android.systemui"}
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.serial == "emulator-5554"
+    assert result.data.data.package == "com.android.systemui"
+    assert result.data.data.pid == 19861

@@ -51,6 +51,9 @@ class FakeBackend:
         getprop_context_result: CommandResult | None = None,
         setprop_result: CommandResult | None = None,
         list_packages_result: CommandResult | None = None,
+        install_result: CommandResult | None = None,
+        pm_uninstall_result: CommandResult | None = None,
+        pm_install_existing_result: CommandResult | None = None,
         send_broadcast_result: CommandResult | None = None,
         start_activity_result: CommandResult | None = None,
         start_service_result: CommandResult | None = None,
@@ -303,6 +306,27 @@ class FakeBackend:
             exit_code=0,
             duration_ms=120.0,
         )
+        # `adb install [flags] apk_path` — the well-documented, long-stable
+        # "Performing Streamed Install" / "Success" wording modern adb uses
+        # for a normal install. Not captured from a live device in this
+        # environment (none was available); flagged for a real-device
+        # check, same caveat as list_packages_result above.
+        self._install_result = install_result or CommandResult(
+            stdout="Performing Streamed Install\nSuccess\n", stderr="", exit_code=0, duration_ms=900.0
+        )
+        # `adb shell pm uninstall [-k] [--user ID] [--versionCode CODE]
+        # PACKAGE` — PackageManagerShellCommand's documented bare "Success"
+        # on success. Same caveat as install_result above.
+        self._pm_uninstall_result = pm_uninstall_result or CommandResult(
+            stdout="Success\n", stderr="", exit_code=0, duration_ms=200.0
+        )
+        # None (the default) means "build a realistic 'Package NAME
+        # installed for user: ID' success message from whatever
+        # package/user_id install_existing_for_user() is actually called
+        # with" — see shell() below, same convention as connect_result. A
+        # fixed override here is for simulating a specific failure. Same
+        # caveat as install_result above.
+        self._pm_install_existing_result = pm_install_existing_result
         # `adb shell am broadcast` — the well-documented, long-stable
         # AOSP `Am.java` output shape ("Broadcasting: Intent { ... }" then
         # "Broadcast completed: result=N"). Not captured from a live device
@@ -562,6 +586,19 @@ class FakeBackend:
             return self._setprop_result
         if command.startswith("pm list packages"):
             return self._list_packages_result
+        if command.startswith("pm uninstall"):
+            return self._pm_uninstall_result
+        if command.startswith("pm install-existing --user "):
+            if self._pm_install_existing_result is not None:
+                return self._pm_install_existing_result
+            rest = command[len("pm install-existing --user ") :]
+            user_id_str, _, package = rest.partition(" ")
+            return CommandResult(
+                stdout=f"Package {package} installed for user: {user_id_str}\n",
+                stderr="",
+                exit_code=0,
+                duration_ms=300.0,
+            )
         if command.startswith("pm clear --cache-only "):
             return self._clear_app_cache_result
         if command.startswith("screencap -p "):
@@ -595,7 +632,8 @@ class FakeBackend:
         return self._shell_result
 
     async def install(self, serial: str, apk_path: str, flags: list[str]) -> CommandResult:
-        raise NotImplementedError("FakeBackend.install: no module needs this yet")
+        self._raise_if_unavailable()
+        return self._install_result
 
     async def uninstall(self, serial: str, package: str, keep_data: bool) -> CommandResult:
         raise NotImplementedError("FakeBackend.uninstall: no module needs this yet")

@@ -2,9 +2,12 @@
 
 `list_devices`, `kill_server`, `start_server`, `connect`, `disconnect`, `root`, and
 `shell` are exercised by modules built so far (diagnostics, device_info, connection, user);
-`install`, `uninstall`, `push`, and `pull` are implemented to the same standard but
-not yet used by any module. None of these have automated contract-test coverage
-against the real binary yet — verified manually against a real device instead.
+`install` is used by the packages module's install_apk (uninstall and
+install-existing-for-user go through `shell` instead — see packages/service.py for
+why). `uninstall` and `push` are implemented to the same standard but not yet used by
+any module; `pull` is used by files and screen. None of these have automated
+contract-test coverage against the real binary yet — verified manually against a real
+device instead.
 """
 
 from __future__ import annotations

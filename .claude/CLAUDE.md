@@ -45,8 +45,9 @@ Useful env vars (see `server.py` header and ADR-010):
 - `ADB_MCP_TIMEOUT_S` — per-command timeout (default 10s)
 - `ADB_MCP_ALLOW_DESTRUCTIVE=1` — flip default policy posture to also allow
   `destructive`-category tools
-- `ADB_MCP_LOCAL_ROOT` — host directory `stop_log_session`'s local path must resolve
-  under; no default, that tool refuses to run until this is set
+- `ADB_MCP_LOCAL_ROOT` — the folder on this machine where file-saving tools
+  (`pull_file`, `take_screenshot`, `stop_log_session`) are allowed to write; no
+  default, those tools refuse to run until this is set
 
 ## Architecture (essentials — see `../docs/ARCHITECTURE.md` for the full picture)
 

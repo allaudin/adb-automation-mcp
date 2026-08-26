@@ -15,6 +15,7 @@ from adb_mcp.modules.user.service import (
     CurrentUser,
     RemoveUserResult,
     SwitchUserResult,
+    UserCapabilities,
     UserDump,
     UserInfo,
     UserList,
@@ -328,3 +329,71 @@ async def remove_user(ctx: Context, serial: str, user_id: int) -> RemoveUserResu
     services = cast("dict[str, object]", ctx.lifespan_context["services"])
     user = cast(UserService, services["user"])
     return await user.remove_user(serial, user_id)
+
+
+@category("read")
+async def get_user_capabilities(ctx: Context, serial: str) -> UserCapabilities:
+    """Get device-wide Android multi-user capabilities: what the platform
+    build supports, not info about any one particular user.
+
+    Aggregates several underlying commands (`pm supports-multiple-users`, `pm
+    get-max-users`, `pm get-max-running-users`, `cmd user
+    is-headless-system-user-mode`, `cmd user
+    is-visible-background-users-supported`, `cmd user
+    is-visible-background-users-on-default-display-supported`) into one flat
+    result — callers never need to know which underlying command family
+    answers a given question. For detail on a specific existing user, use
+    user_info, dump_user, or list_users instead.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+
+    Returns:
+        The device's serial plus its multi-user support flags/limits. The
+        three `pm`-backed fields (supports_multiple_users, max_users,
+        max_running_users) are always populated on any adb-reachable device —
+        multi-user support has existed since Android 4.2. The three `cmd
+        user`-backed fields (headless_system_user_mode,
+        visible_background_users_supported,
+        visible_background_users_on_default_display_supported) are newer
+        subcommands not available on every Android version; each is
+        independently None when unsupported on this particular device rather
+        than failing the whole call.
+
+    Error handling:
+        Propagates the same way most tools do (unlike check_adb_available): if
+        the adb binary itself can't be found or is unresponsive, or the
+        serial doesn't match a connected device, that surfaces as an actual
+        tool error for any of the six underlying commands. A non-zero exit
+        from one of the three newer `cmd user` subcommands that is NOT a
+        device/serial problem (e.g. an unrecognized subcommand on an older
+        Android build) is not treated as an error — it degrades just that one
+        field to None and the call still returns the rest of the data
+        successfully. Unparseable output from one of the three older, stable
+        `pm` commands is treated as a genuine unexpected-shape failure rather
+        than a version-gating issue, since those commands have been stable
+        since Android 4.2.
+
+    Example:
+        Called with serial="emulator-5554". A typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "emulator-5554 supports multiple users (max 4, max running 4).",
+          "data": {
+            "serial": "emulator-5554",
+            "supports_multiple_users": true,
+            "max_users": 4,
+            "max_running_users": 4,
+            "headless_system_user_mode": false,
+            "visible_background_users_supported": false,
+            "visible_background_users_on_default_display_supported": false
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    user = cast(UserService, services["user"])
+    return await user.get_user_capabilities(serial)

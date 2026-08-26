@@ -26,22 +26,45 @@ An MCP server that exposes Android Debug Bridge (ADB) capabilities to MCP client
 - Per-user or per-identity RBAC. The policy layer governs which tools exist at all on
   a given server instance, not who is calling it.
 
-**Current implementation status (2026-08-26):** five modules exist under
+**Current implementation status (2026-08-26):** six modules exist under
 `src/adb_mcp/modules/`: `diagnostics` (`check_adb_available`), `device_info`
 (`list_connected_devices`), `connection` (`restart_adb_server`,
-`connect_device`, `disconnect_device`), `user` (`get_current_user`,
-`dump_user`, `user_info`, `list_users`, `switch_user`, `create_user`,
-`remove_user`), and `logger` (`read_logs`, `clear_logs`,
-`get_log_buffer_size`, `read_package_logs`, `start_log_session`,
+`connect_device`, `disconnect_device`, `restart_adbd_as_root` — the last
+restarts the *device-side* `adbd` daemon as root, `adb -s <serial> root`,
+distinct from `restart_adb_server`'s host-side adb server restart; judged on
+adb's message text rather than exit code, mirroring `connect_device`'s own
+exit-code-is-useless handling, and categorized `destructive` since it's a
+genuine privilege escalation rather than a data-mutating write — the only
+opt-in-gated category this project's policy model currently has for that),
+`user` (`get_current_user`, `dump_user`, `user_info`, `list_users`,
+`switch_user`, `create_user`, `remove_user`, `get_user_capabilities` — the
+last aggregates six separate `pm`/`cmd user` capability queries behind one
+read-only tool, treating the old `pm` ones as always-must-succeed and the
+newer `cmd user` ones as independently gracefully-degradable to `None` on
+Android versions that don't recognize them, without swallowing a genuine
+device-not-found failure on any of the six), `logger` (`read_logs`,
+`clear_logs`, `get_log_buffer_size`, `read_package_logs`, `start_log_session`,
 `stop_log_session` — see the Tool Reference site for exactly what each `adb
-shell` command is and its verified quirks). `stop_log_session` is the first
-tool that writes to the host filesystem; it's gated by a call-time
+shell` command is and its verified quirks), and `system_properties`
+(`get_property`, `list_properties`, `get_property_metadata`,
+`set_property` — rejects the `ctl.*`/`sys.powerctl` control-property
+namespaces up front rather than tunneling lifecycle/power operations through
+a plain property write; `get_property_metadata`'s SELinux-context/declared-type
+fields are best-effort and degrade to `None` on devices/Android versions that
+don't support the underlying `getprop -Z` capability). `stop_log_session` is
+the first tool that writes to the host filesystem; it's gated by a call-time
 `local_root` check (`ADB_MCP_LOCAL_ROOT`) — no default, refuses to run until
 an operator sets it.
 It passes `mypy --strict`, `ruff`,
 `pytest`, and has been verified
 end-to-end through a real `fastmcp` `Client` call, including against a real
-adb install for every module's failure paths. CI
+adb install for every module's failure paths except `system_properties` and
+the newer parts of `connection`/`user` (`restart_adbd_as_root`,
+`get_user_capabilities`), whose fixtures are shaped on documented adb/toybox
+behavior rather than a live-device capture (no device was available when
+they were added) — worth a real-device check before relying on
+`get_property_metadata`, `restart_adbd_as_root`'s exact wording, or
+`get_user_capabilities`'s optional fields in production. CI
 (`.github/workflows/ci.yml`) runs lint, type-check, and tests on every push/PR to
 `main`, plus a strict `mkdocs build` and (on merge to `main`) a GitHub Pages deploy.
 Everything else described below — additional modules, release automation,
@@ -375,10 +398,12 @@ adb-mcp-server/
 │       │   ├── subprocess_backend.py
 │       │   └── testing.py    # FakeBackend
 │       └── modules/
-│           ├── diagnostics/  # service.py, tools.py, manifest.py
-│           ├── device_info/  # service.py, tools.py, manifest.py
-│           ├── connection/   # service.py, tools.py, manifest.py
-│           └── user/         # service.py, tools.py, manifest.py
+│           ├── diagnostics/       # service.py, tools.py, manifest.py
+│           ├── device_info/       # service.py, tools.py, manifest.py
+│           ├── connection/        # service.py, tools.py, manifest.py
+│           ├── user/              # service.py, tools.py, manifest.py
+│           ├── logger/            # service.py, tools.py, manifest.py
+│           └── system_properties/ # service.py, tools.py, manifest.py
 └── tests/
     ├── meta/                 # Layer 0 — registry contract (typing + docstrings)
     ├── unit/                 # Layer 1, per module

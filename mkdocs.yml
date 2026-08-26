@@ -8,6 +8,13 @@ edit_uri: edit/main/docs/
 docs_dir: docs
 site_dir: site
 
+# mkdocstrings pulls tool docstrings straight from src/ (see the Tool
+# Reference nav below) — without this, `mkdocs serve`'s live-reload only
+# watches docs_dir/mkdocs.yml and silently keeps serving stale docstring
+# content after a .py file changes, since git isn't otherwise involved.
+watch:
+  - src
+
 # Internal-only file, not part of the public site.
 exclude_docs: |
   ADR.md
@@ -26,6 +33,23 @@ nav:
       - connection: reference/connection.md
       - user: reference/user.md
       - logger: reference/logger.md
+      - system_properties: reference/system_properties.md
+      - packages: reference/packages.md
+      - activities: reference/activities.md
+      - app_data: reference/app_data.md
+      - android_services: reference/android_services.md
+      - broadcasts: reference/broadcasts.md
+      - date_time: reference/date_time.md
+      - displays: reference/displays.md
+      - files: reference/files.md
+      - network: reference/network.md
+      - permissions: reference/permissions.md
+      - power: reference/power.md
+      - processes: reference/processes.md
+      - screen: reference/screen.md
+      - settings: reference/settings.md
+      - input: reference/input.md
+      - ui: reference/ui.md
   - Integrations:
       - Claude Code: integrations/claude-code.md
 

@@ -145,6 +145,38 @@ class RemoveUserResult(BaseModel):
         return f"Removed user {self.user_id} on {self.serial}."
 
 
+class UserCapabilities(BaseModel):
+    """Device-wide Android multi-user capabilities — what the platform/build
+    supports, not info about any one particular user (see user_info/dump_user/
+    list_users for that).
+
+    Aggregates two tiers of underlying commands into one flat result:
+    supports_multiple_users/max_users/max_running_users come from `pm`
+    subcommands that have existed since Android 4.2 and are treated as
+    always-populated on any adb-reachable device. headless_system_user_mode,
+    visible_background_users_supported, and
+    visible_background_users_on_default_display_supported come from newer
+    `cmd user` subcommands that don't exist on every Android version — each
+    is independently `None` when unsupported on this particular device
+    rather than failing the whole call.
+    """
+
+    serial: str
+    supports_multiple_users: bool
+    max_users: int
+    max_running_users: int
+    headless_system_user_mode: bool | None
+    visible_background_users_supported: bool | None
+    visible_background_users_on_default_display_supported: bool | None
+
+    def summary(self) -> str:
+        support = "supports" if self.supports_multiple_users else "does not support"
+        return (
+            f"{self.serial} {support} multiple users "
+            f"(max {self.max_users}, max running {self.max_running_users})."
+        )
+
+
 class UserService:
     """Reads and changes Android user state on a connected device."""
 
@@ -211,6 +243,97 @@ class UserService:
         self._raise_for_shell_failure(serial, result)
         return RemoveUserResult(serial=serial, user_id=user_id)
 
+    async def get_user_capabilities(self, serial: str) -> UserCapabilities:
+        # Tier 1: old, universally-supported `pm` subcommands (multi-user
+        # support has existed since Android 4.2). A genuine transport failure
+        # here is a real error; unparseable output from a stable command is a
+        # genuine unexpected-shape problem, not a version-gating issue.
+        supports_result = await self._backend.shell(serial, "pm supports-multiple-users")
+        self._raise_for_shell_failure(serial, supports_result)
+        supports_multiple_users = _parse_bool_output(supports_result.stdout)
+        if supports_multiple_users is None:
+            raise BackendError(
+                supports_result.stdout.strip()
+                or "pm supports-multiple-users succeeded but returned unexpected output.",
+                details={"serial": serial},
+            )
+
+        max_users_result = await self._backend.shell(serial, "pm get-max-users")
+        self._raise_for_shell_failure(serial, max_users_result)
+        max_users = _parse_int_output(max_users_result.stdout)
+        if max_users is None:
+            raise BackendError(
+                max_users_result.stdout.strip()
+                or "pm get-max-users succeeded but returned unexpected output.",
+                details={"serial": serial},
+            )
+
+        max_running_result = await self._backend.shell(serial, "pm get-max-running-users")
+        self._raise_for_shell_failure(serial, max_running_result)
+        max_running_users = _parse_int_output(max_running_result.stdout)
+        if max_running_users is None:
+            raise BackendError(
+                max_running_result.stdout.strip()
+                or "pm get-max-running-users succeeded but returned unexpected output.",
+                details={"serial": serial},
+            )
+
+        # Tier 2: newer `cmd user` subcommands that may not exist on older
+        # Android versions. Each is independently degraded to None on any
+        # non-"not found" non-zero exit; a genuine "not found" (bad serial)
+        # still fails the whole call, same as every other method here.
+        headless_system_user_mode = await self._optional_bool_capability(
+            serial, "cmd user is-headless-system-user-mode"
+        )
+        visible_background_users_supported = await self._optional_bool_capability(
+            serial, "cmd user is-visible-background-users-supported"
+        )
+        visible_background_users_on_default_display_supported = await self._optional_bool_capability(
+            serial, "cmd user is-visible-background-users-on-default-display-supported"
+        )
+
+        return UserCapabilities(
+            serial=serial,
+            supports_multiple_users=supports_multiple_users,
+            max_users=max_users,
+            max_running_users=max_running_users,
+            headless_system_user_mode=headless_system_user_mode,
+            visible_background_users_supported=visible_background_users_supported,
+            visible_background_users_on_default_display_supported=(
+                visible_background_users_on_default_display_supported
+            ),
+        )
+
+    async def _optional_bool_capability(self, serial: str, command: str) -> bool | None:
+        result = await self._backend.shell(serial, command)
+        if result.exit_code != 0:
+            message = (result.stderr or result.stdout).strip() or "adb shell command exited non-zero."
+            if _is_device_transport_failure(message):
+                # A genuinely disconnected/unreachable device is a real
+                # failure, not merely "this capability is unsupported here".
+                raise DeviceNotFoundError(message, details={"serial": serial})
+            # Any other non-zero exit (e.g. an unrecognized subcommand on an
+            # older Android build, or the on-device shell itself reporting
+            # "cmd: not found" because `cmd` doesn't exist pre-Android 7) is
+            # a missing capability, not a failure.
+            return None
+        return _parse_bool_output(result.stdout)
+
+
+def _is_device_transport_failure(message: str) -> bool:
+    """True only for the adb-client-level "unknown serial" failure, e.g.
+    "adb: device 'bogus' not found" — never for an on-device shell error that
+    happens to also contain "not found", such as "/system/bin/sh: cmd: not
+    found" on a pre-Android-7 build that lacks the `cmd` binary entirely.
+    That distinction matters specifically for get_user_capabilities's Tier 2
+    commands: a missing `cmd` binary is exactly the "older Android version"
+    case those are meant to degrade gracefully for, not a transport failure —
+    a bare "not found" substring check (as used by _raise_for_shell_failure,
+    where every command it guards is old enough to always exist) would
+    misclassify it as DeviceNotFoundError instead.
+    """
+    return message.startswith("adb:") and "not found" in message
+
 
 # One line of `adb shell cmd user list -v`, e.g.:
 # "1: id=10, name=Driver, type=full.SECONDARY, flags=ADMIN|FULL|INITIALIZED (running) (current) (visible)"
@@ -236,3 +359,36 @@ def _parse_user_list(output: str) -> list[UserListEntry]:
             )
         )
     return entries
+
+
+def _parse_bool_output(output: str) -> bool | None:
+    """Parse a boolean-shaped `pm`/`cmd user` output line.
+
+    Defensive by design: real observed Android wording is often a labeled
+    line like "Supports multiple users: true" rather than a bare "true", so
+    this checks whether the LAST whitespace-separated token lowercases to
+    "true"/"false" instead of requiring an exact match. Returns None if
+    neither — callers decide whether that's an error (Tier 1) or a
+    gracefully-degraded missing capability (Tier 2).
+    """
+    stripped = output.strip()
+    if not stripped:
+        return None
+    last_token = stripped.split()[-1].lower()
+    if last_token == "true":
+        return True
+    if last_token == "false":
+        return False
+    return None
+
+
+# Matches the first integer (optionally negative) anywhere in the output, so
+# both a bare "4" and a labeled "Maximum supported users: 4" parse the same way.
+_INT_OUTPUT_RE = re.compile(r"-?\d+")
+
+
+def _parse_int_output(output: str) -> int | None:
+    match = _INT_OUTPUT_RE.search(output)
+    if match is None:
+        return None
+    return int(match.group())

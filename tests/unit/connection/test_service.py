@@ -8,12 +8,13 @@ import pytest
 
 from adb_mcp.backend.protocol import CommandResult
 from adb_mcp.backend.testing import FakeBackend
-from adb_mcp.errors import AdbUnavailableError
+from adb_mcp.errors import AdbUnavailableError, DeviceNotFoundError
 from adb_mcp.modules.connection.service import (
     AdbServerRestartResult,
     ConnectionService,
     ConnectResult,
     DisconnectResult,
+    RestartAdbdAsRootResult,
 )
 
 
@@ -188,3 +189,97 @@ def test_disconnect_result_summary_includes_output_on_failure() -> None:
     ).summary()
     assert "Failed to disconnect" in summary
     assert "no such device" in summary
+
+
+@pytest.mark.asyncio
+async def test_restart_adbd_as_root__fresh_restart_reports_success_true_already_root_false() -> None:
+    # FakeBackend's default root_result fixture: real "restarting adbd as root" wording.
+    service = ConnectionService(FakeBackend())
+
+    result = await service.restart_adbd_as_root("emulator-5554")
+
+    assert result.success is True
+    assert result.already_root is False
+    assert result.serial == "emulator-5554"
+    assert "restarting adbd as root" in result.output
+
+
+@pytest.mark.asyncio
+async def test_restart_adbd_as_root__already_root_reports_success_true_already_root_true() -> None:
+    backend = FakeBackend(
+        root_result=CommandResult(
+            stdout="adbd is already running as root\n", stderr="", exit_code=0, duration_ms=50.0
+        )
+    )
+    service = ConnectionService(backend)
+
+    result = await service.restart_adbd_as_root("emulator-5554")
+
+    assert result.success is True
+    assert result.already_root is True
+
+
+@pytest.mark.asyncio
+async def test_restart_adbd_as_root__production_build_reports_success_false_despite_exit_code_0() -> None:
+    # Real adb behavior, verified against documented wording: exits 0 even
+    # when the build refuses, the same shape of ambiguity as `adb connect`.
+    backend = FakeBackend(
+        root_result=CommandResult(
+            stdout="adbd cannot run as root in production builds\n", stderr="", exit_code=0, duration_ms=30.0
+        )
+    )
+    service = ConnectionService(backend)
+
+    result = await service.restart_adbd_as_root("emulator-5554")
+
+    assert result.success is False
+    assert result.already_root is False
+    assert "production builds" in result.output
+
+
+@pytest.mark.asyncio
+async def test_restart_adbd_as_root__unknown_serial_raises_device_not_found() -> None:
+    backend = FakeBackend(
+        root_result=CommandResult(
+            stdout="", stderr="adb: device 'bogus-serial' not found\n", exit_code=1, duration_ms=10.0
+        )
+    )
+    service = ConnectionService(backend)
+
+    with pytest.raises(DeviceNotFoundError):
+        await service.restart_adbd_as_root("bogus-serial")
+
+
+@pytest.mark.asyncio
+async def test_restart_adbd_as_root__adb_unavailable_propagates_as_error() -> None:
+    service = ConnectionService(FakeBackend(unavailable=True))
+
+    with pytest.raises(AdbUnavailableError):
+        await service.restart_adbd_as_root("emulator-5554")
+
+
+def test_restart_adbd_as_root_result_summary_mentions_serial_on_fresh_restart() -> None:
+    summary = RestartAdbdAsRootResult(
+        serial="emulator-5554", success=True, already_root=False, output="restarting adbd as root"
+    ).summary()
+    assert "restarted as root" in summary
+    assert "emulator-5554" in summary
+
+
+def test_restart_adbd_as_root_result_summary_mentions_already_root() -> None:
+    summary = RestartAdbdAsRootResult(
+        serial="emulator-5554", success=True, already_root=True, output="adbd is already running as root"
+    ).summary()
+    assert "already" in summary
+    assert "emulator-5554" in summary
+
+
+def test_restart_adbd_as_root_result_summary_includes_output_on_rejection() -> None:
+    summary = RestartAdbdAsRootResult(
+        serial="emulator-5554",
+        success=False,
+        already_root=False,
+        output="adbd cannot run as root in production builds",
+    ).summary()
+    assert "cannot run as root" in summary
+    assert "production builds" in summary

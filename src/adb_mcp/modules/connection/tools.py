@@ -15,6 +15,7 @@ from adb_mcp.modules.connection.service import (
     ConnectionService,
     ConnectResult,
     DisconnectResult,
+    RestartAdbdAsRootResult,
 )
 from adb_mcp.registry import category
 
@@ -155,3 +156,71 @@ async def disconnect_device(ctx: Context, host: str, port: int = 5555) -> Discon
     services = cast("dict[str, object]", ctx.lifespan_context["services"])
     connection = cast(ConnectionService, services["connection"])
     return await connection.disconnect(host, port)
+
+
+@category("destructive")
+async def restart_adbd_as_root(ctx: Context, serial: str) -> RestartAdbdAsRootResult:
+    """Restart the on-device `adbd` daemon as root: `adb -s serial root`.
+
+    This is the device-side equivalent of `adb root` — a privilege
+    escalation of the daemon running *on the device*, not this host's own
+    adb client/server process (that's restart_adb_server; the two are
+    unrelated operations, and one restarting doesn't restart the other).
+    Once adbd is running as root, subsequent shell commands against this
+    serial run with root privileges until adbd is restarted again (e.g. via
+    `adb unroot`, a device reboot, or another root call) — categorized
+    destructive, and therefore denied by default, because it's a genuine
+    privilege escalation on the device, not merely a write. Restarting adbd
+    also briefly drops the device off the adb transport (it disconnects and
+    reconnects on its own): an immediately-following tool call against the
+    same serial can transiently fail with a device-not-found error — retry
+    it rather than assuming the device is actually gone.
+
+    Args:
+        serial: The target device's serial number, as reported by
+            list_connected_devices.
+
+    Returns:
+        Whether adbd is now running as root (true for both a fresh restart
+        and the idempotent "already root" case), whether it was already root
+        before this call, and adb's raw output for diagnostic context.
+        Judged primarily on the message text, not the exit code — `adb -s
+        serial root` is documented to behave like `adb connect`, which is
+        known to exit 0 unconditionally: exiting 0 whether adbd actually
+        ended up running as root or the device's build refused ("adbd cannot
+        run as root in production builds") — not independently verified live
+        in this environment, so known-wording checks are applied before
+        exit-code checks either way.
+        The production-build refusal is a normal, expected answer on a
+        non-debuggable build, so it's returned as success: false rather than
+        raised as an error.
+
+    Error handling:
+        Propagates the same way most tools do: an unknown serial never
+        reaches adbd at all (`adb: device '<serial>' not found`, exit
+        non-zero) and surfaces as a DeviceNotFoundError, and an unreachable
+        adb binary surfaces as AdbUnavailableError — both actual tool errors,
+        unlike the production-build refusal above. adbd responding with
+        neither a known wording nor a recognizable failure is also a real
+        error (BackendError) rather than being guessed at.
+
+    Example:
+        Called with serial="emulator-5554". A typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "adbd restarted as root on emulator-5554.",
+          "data": {
+            "serial": "emulator-5554",
+            "success": true,
+            "already_root": false,
+            "output": "restarting adbd as root"
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    connection = cast(ConnectionService, services["connection"])
+    return await connection.restart_adbd_as_root(serial)

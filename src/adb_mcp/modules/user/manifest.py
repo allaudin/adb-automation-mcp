@@ -10,6 +10,7 @@ from adb_mcp.modules.user.tools import (
     create_user,
     dump_user,
     get_current_user,
+    get_user_capabilities,
     list_users,
     remove_user,
     switch_user,
@@ -28,6 +29,7 @@ MODULE = ModuleManifest(
         switch_user,
         create_user,
         remove_user,
+        get_user_capabilities,
     ],
     resources=[],
 )

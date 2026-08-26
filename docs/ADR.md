@@ -464,6 +464,51 @@ established workaround, not a per-tool judgment call.
 
 ---
 
+## ADR-018: `restart_adbd_as_root` — a `root` Primitive, Judged Text-First
+
+**Status:** Accepted — extends ADR-001/ADR-016/ADR-017
+
+**Context:** `connection` needed a way to restart the *device-side* `adbd` daemon as
+root (`adb -s <serial> root`) — distinct from `restart_adb_server`'s host-side
+`kill-server`/`start-server`, and distinct from every shell-routed module's
+`shell(serial, command)` calls, since `root` is a top-level, per-device adb-client
+subcommand, not something `adb shell` can express. No adb/rootable device was
+available in this environment, unlike ADR-016/ADR-017's live verification against a
+real device — the design below is based on `adb root`'s documented behavior, not
+independently confirmed here, and is flagged as such in code (`ARCHITECTURE.md` §1,
+`RestartAdbdAsRootResult`'s docstring, and the `FakeBackend` fixture comment).
+
+**Decision:** Add a fourth device-scoped primitive to `AdbBackend`, `root(serial)`, at
+the same mechanical-execution granularity as `connect`/`disconnect` (ADR-016/017).
+`ConnectionService.restart_adbd_as_root` checks for three known `adb root` stdout
+wordings *before* looking at the exit code at all — `"restarting adbd as root"`,
+`"adbd is already running as root"`, and `"adbd cannot run as root in production
+builds"` (the last a normal, expected non-debuggable-build answer, returned as
+`success: false` domain data, not raised) — and only falls back to exit-code-based
+transport-failure classification (`DeviceNotFoundError`/`BackendError`) when none of
+those wordings appear. This differs deliberately from `connect_device`'s ADR-017
+design, which trusts that `adb connect` always exits 0 (verified live) and so never
+needs to look at exit code at all for its success/failure judgment: here, since the
+exit-code behavior is unverified, wording is checked first so an unexpected non-zero
+exit on a real device doesn't misclassify a legitimate "reached adbd, got a known
+answer" outcome as a transport error.
+
+Categorized `@category("destructive")` — the only deny-by-default/opt-in category
+`PolicyEngine` (ADR-010) has — since restarting adbd as root is a genuine privilege
+escalation on the device, not a data-mutating write, and no more specific category
+exists (see the new Deferred/Open Questions entry on this below).
+
+**Consequences:** Restarting adbd also briefly drops the device off the adb
+transport (documented in the tool's docstring, following ADR-016's precedent of
+noting `restart_adb_server`'s TCP-disconnect side effect) — an immediately-following
+call against the same serial can transiently see a device-not-found failure. Because
+the exit-code assumption is unverified, a real-device pass is still owed before
+trusting the three-wording classification in production, same caveat as
+`system_properties`' `getprop -Z`-based metadata (see that module's own ADR-worthy
+note in `ARCHITECTURE.md` §1, though it predates a dedicated ADR entry).
+
+---
+
 ## Deferred / Open Questions
 
 Decisions deliberately not made yet, with the condition that would trigger revisiting

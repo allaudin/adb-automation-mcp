@@ -19,6 +19,7 @@ from adb_mcp.modules.user.service import (
     CurrentUser,
     RemoveUserResult,
     SwitchUserResult,
+    UserCapabilities,
     UserDump,
     UserInfo,
     UserList,
@@ -457,3 +458,224 @@ def test_remove_user_result_summary_mentions_user_id() -> None:
     summary = RemoveUserResult(serial="emulator-5554", user_id=12).summary()
     assert "12" in summary
     assert "emulator-5554" in summary
+
+
+@pytest.mark.asyncio
+async def test_get_user_capabilities__multi_user_capable_device_populates_everything() -> None:
+    service = UserService(FakeBackend())
+
+    result = await service.get_user_capabilities("emulator-5554")
+
+    assert result == UserCapabilities(
+        serial="emulator-5554",
+        supports_multiple_users=True,
+        max_users=4,
+        max_running_users=4,
+        headless_system_user_mode=False,
+        visible_background_users_supported=False,
+        visible_background_users_on_default_display_supported=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_user_capabilities__single_user_device_reports_false() -> None:
+    backend = FakeBackend(
+        supports_multiple_users_result=CommandResult(
+            stdout="Supports multiple users: false\n", stderr="", exit_code=0, duration_ms=20.0
+        )
+    )
+    service = UserService(backend)
+
+    result = await service.get_user_capabilities("emulator-5554")
+
+    assert result.supports_multiple_users is False
+
+
+@pytest.mark.asyncio
+async def test_get_user_capabilities__max_users_parses_labeled_text_variant() -> None:
+    backend = FakeBackend(
+        max_users_result=CommandResult(
+            stdout="Maximum supported users: 4\n", stderr="", exit_code=0, duration_ms=20.0
+        )
+    )
+    service = UserService(backend)
+
+    result = await service.get_user_capabilities("emulator-5554")
+
+    assert result.max_users == 4
+
+
+@pytest.mark.asyncio
+async def test_get_user_capabilities__max_running_users_parses_bare_int() -> None:
+    backend = FakeBackend(
+        max_running_users_result=CommandResult(stdout="2\n", stderr="", exit_code=0, duration_ms=20.0)
+    )
+    service = UserService(backend)
+
+    result = await service.get_user_capabilities("emulator-5554")
+
+    assert result.max_running_users == 2
+
+
+@pytest.mark.asyncio
+async def test_get_user_capabilities__headless_system_user_mode_true() -> None:
+    backend = FakeBackend(
+        headless_system_user_mode_result=CommandResult(
+            stdout="true\n", stderr="", exit_code=0, duration_ms=20.0
+        )
+    )
+    service = UserService(backend)
+
+    result = await service.get_user_capabilities("emulator-5554")
+
+    assert result.headless_system_user_mode is True
+
+
+@pytest.mark.asyncio
+async def test_get_user_capabilities__headless_system_user_mode_false() -> None:
+    service = UserService(FakeBackend())
+
+    result = await service.get_user_capabilities("emulator-5554")
+
+    assert result.headless_system_user_mode is False
+
+
+@pytest.mark.asyncio
+async def test_get_user_capabilities__visible_background_users_supported_true() -> None:
+    backend = FakeBackend(
+        visible_background_users_supported_result=CommandResult(
+            stdout="true\n", stderr="", exit_code=0, duration_ms=20.0
+        )
+    )
+    service = UserService(backend)
+
+    result = await service.get_user_capabilities("emulator-5554")
+
+    assert result.visible_background_users_supported is True
+
+
+@pytest.mark.asyncio
+async def test_get_user_capabilities__one_tier2_capability_unrecognized_degrades_to_none() -> None:
+    # An older Android build that doesn't recognize this cmd user subcommand:
+    # non-zero exit, no "not found" — should degrade to None, not fail the call.
+    backend = FakeBackend(
+        headless_system_user_mode_result=CommandResult(
+            stdout="", stderr="Unknown command: is-headless-system-user-mode", exit_code=1, duration_ms=20.0
+        )
+    )
+    service = UserService(backend)
+
+    result = await service.get_user_capabilities("emulator-5554")
+
+    assert result.headless_system_user_mode is None
+    # The rest of the call still succeeds and is populated normally.
+    assert result.supports_multiple_users is True
+    assert result.max_users == 4
+
+
+@pytest.mark.asyncio
+async def test_get_user_capabilities__on_device_shell_not_found_degrades_to_none_not_device_not_found() -> None:
+    # A pre-Android-7 build lacking the `cmd` binary entirely fails at the
+    # on-device shell level ("cmd: not found"), NOT the adb-client level
+    # ("adb: device '<serial>' not found") — this must still degrade to None
+    # like any other unrecognized Tier 2 subcommand, not be misclassified as
+    # a transport failure just because its message also contains "not found".
+    backend = FakeBackend(
+        headless_system_user_mode_result=CommandResult(
+            stdout="", stderr="/system/bin/sh: cmd: not found", exit_code=127, duration_ms=15.0
+        )
+    )
+    service = UserService(backend)
+
+    result = await service.get_user_capabilities("emulator-5554")
+
+    assert result.headless_system_user_mode is None
+    assert result.supports_multiple_users is True
+
+
+@pytest.mark.asyncio
+async def test_get_user_capabilities__unparseable_tier1_boolean_raises_backend_error() -> None:
+    backend = FakeBackend(
+        supports_multiple_users_result=CommandResult(
+            stdout="unexpected garbage\n", stderr="", exit_code=0, duration_ms=20.0
+        )
+    )
+    service = UserService(backend)
+
+    with pytest.raises(BackendError):
+        await service.get_user_capabilities("emulator-5554")
+
+
+@pytest.mark.asyncio
+async def test_get_user_capabilities__unparseable_tier1_integer_raises_backend_error() -> None:
+    backend = FakeBackend(
+        max_users_result=CommandResult(stdout="unexpected garbage\n", stderr="", exit_code=0, duration_ms=20.0)
+    )
+    service = UserService(backend)
+
+    with pytest.raises(BackendError):
+        await service.get_user_capabilities("emulator-5554")
+
+
+@pytest.mark.asyncio
+async def test_get_user_capabilities__tier1_command_unknown_serial_raises_device_not_found() -> None:
+    backend = FakeBackend(
+        supports_multiple_users_result=CommandResult(
+            stdout="", stderr="adb: device 'bogus' not found\n", exit_code=1, duration_ms=10.0
+        )
+    )
+    service = UserService(backend)
+
+    with pytest.raises(DeviceNotFoundError):
+        await service.get_user_capabilities("bogus")
+
+
+@pytest.mark.asyncio
+async def test_get_user_capabilities__tier2_command_not_found_still_fails_whole_call() -> None:
+    # A genuine transport failure on a Tier 2 command must not be swallowed
+    # just because that command is "optional".
+    backend = FakeBackend(
+        visible_background_users_on_default_display_supported_result=CommandResult(
+            stdout="", stderr="adb: device 'bogus' not found\n", exit_code=1, duration_ms=10.0
+        )
+    )
+    service = UserService(backend)
+
+    with pytest.raises(DeviceNotFoundError):
+        await service.get_user_capabilities("bogus")
+
+
+@pytest.mark.asyncio
+async def test_get_user_capabilities__adb_unavailable_propagates_as_error() -> None:
+    service = UserService(FakeBackend(unavailable=True))
+
+    with pytest.raises(AdbUnavailableError):
+        await service.get_user_capabilities("emulator-5554")
+
+
+def test_user_capabilities_summary_mentions_support_and_limits() -> None:
+    summary = UserCapabilities(
+        serial="emulator-5554",
+        supports_multiple_users=True,
+        max_users=4,
+        max_running_users=4,
+        headless_system_user_mode=False,
+        visible_background_users_supported=False,
+        visible_background_users_on_default_display_supported=False,
+    ).summary()
+    assert "emulator-5554" in summary
+    assert "supports multiple users" in summary
+    assert "4" in summary
+
+
+def test_user_capabilities_summary_mentions_lack_of_support() -> None:
+    summary = UserCapabilities(
+        serial="emulator-5554",
+        supports_multiple_users=False,
+        max_users=1,
+        max_running_users=1,
+        headless_system_user_mode=None,
+        visible_background_users_supported=None,
+        visible_background_users_on_default_display_supported=None,
+    ).summary()
+    assert "does not support multiple users" in summary

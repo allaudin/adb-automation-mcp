@@ -1,15 +1,45 @@
 [project]
-name = "adb-mcp-server"
+name = "android-adb-mcp"
 version = "0.1.0"
 description = "MCP server exposing Android Debug Bridge (ADB) capabilities as tools and resources."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
+authors = [
+    { name = "M. Allaudin", email = "dev.allaudin@gmail.com" },
+]
+keywords = [
+    "adb",
+    "android",
+    "android-debug-bridge",
+    "mcp",
+    "model-context-protocol",
+    "fastmcp",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+    "Topic :: System :: Networking",
+]
 dependencies = [
     "fastmcp>=3.0",
     "pydantic>=2.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/allaudin/adb-mcp-server"
+Repository = "https://github.com/allaudin/adb-mcp-server"
+Documentation = "https://allaudin.github.io/adb-mcp-server/"
+Issues = "https://github.com/allaudin/adb-mcp-server/issues"
 
 [project.scripts]
 adb-mcp-server = "adb_mcp.server:main"
@@ -20,6 +50,23 @@ device_info = "adb_mcp.modules.device_info.manifest:MODULE"
 connection = "adb_mcp.modules.connection.manifest:MODULE"
 user = "adb_mcp.modules.user.manifest:MODULE"
 logger = "adb_mcp.modules.logger.manifest:MODULE"
+system_properties = "adb_mcp.modules.system_properties.manifest:MODULE"
+packages = "adb_mcp.modules.packages.manifest:MODULE"
+activities = "adb_mcp.modules.activities.manifest:MODULE"
+broadcasts = "adb_mcp.modules.broadcasts.manifest:MODULE"
+android_services = "adb_mcp.modules.android_services.manifest:MODULE"
+processes = "adb_mcp.modules.processes.manifest:MODULE"
+files = "adb_mcp.modules.files.manifest:MODULE"
+app_data = "adb_mcp.modules.app_data.manifest:MODULE"
+screen = "adb_mcp.modules.screen.manifest:MODULE"
+permissions = "adb_mcp.modules.permissions.manifest:MODULE"
+settings = "adb_mcp.modules.settings.manifest:MODULE"
+displays = "adb_mcp.modules.displays.manifest:MODULE"
+power = "adb_mcp.modules.power.manifest:MODULE"
+network = "adb_mcp.modules.network.manifest:MODULE"
+date_time = "adb_mcp.modules.date_time.manifest:MODULE"
+input = "adb_mcp.modules.input.manifest:MODULE"
+ui = "adb_mcp.modules.ui.manifest:MODULE"
 
 [dependency-groups]
 dev = [

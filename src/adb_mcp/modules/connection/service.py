@@ -9,6 +9,7 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from adb_mcp.backend.protocol import AdbBackend
+from adb_mcp.errors import BackendError, DeviceNotFoundError
 
 
 class AdbServerRestartResult(BaseModel):
@@ -64,9 +65,53 @@ class DisconnectResult(BaseModel):
         return f"Failed to disconnect from {self.address}: {self.output or 'unknown reason'}"
 
 
+class RestartAdbdAsRootResult(BaseModel):
+    """Outcome of restarting the on-device `adbd` daemon as root
+    (`adb -s <serial> root`) — the device-side equivalent of
+    restart_adb_server, which only restarts the *host's* adb client/server
+    process and never touches privilege on the device at all.
+
+    Like `adb connect`, this is assumed to have the same shape of ambiguity —
+    based on documented `adb root` behavior, not independently verified live
+    in this environment (no rootable device was available) — so
+    success/already_root are judged primarily on adb's message text rather
+    than the exit code, on the theory that a known wording being present
+    proves adbd was actually reached regardless of what exit code that adb
+    version happens to use:
+
+    - "restarting adbd as root" — freshly restarted as root this call.
+    - "adbd is already running as root" — idempotent case, no-op restart.
+    - "adbd cannot run as root in production builds" — a normal, expected
+      answer on a non-debuggable build, not a tool error; surfaced as
+      success=False, already_root=False, same as ConnectResult.success=False
+      is data rather than a raised exception.
+
+    Only a transport-level failure that never reaches adbd at all — an
+    unknown serial ("adb: device '<serial>' not found", exit 1, the same
+    client-level check every other per-device command hits) or the adb
+    binary being unavailable — raises an actual error (DeviceNotFoundError /
+    AdbUnavailableError respectively).
+    """
+
+    serial: str
+    success: bool
+    already_root: bool
+    output: str
+
+    def summary(self) -> str:
+        if self.success and self.already_root:
+            return f"adbd was already running as root on {self.serial}."
+        if self.success:
+            return f"adbd restarted as root on {self.serial}."
+        return f"adbd cannot run as root on {self.serial}: {self.output or 'unknown reason'}"
+
+
 class ConnectionService:
-    """Operations that change how this host's adb server runs or what it's
-    connected to — global and non-device-scoped, unlike most other modules.
+    """Operations that change how this host's adb reaches a device: the local
+    adb server's own lifecycle and its connections (global, non-device-scoped
+    — restart_adb_server/connect/disconnect), plus the device-side transport
+    endpoint itself (device-scoped — restart_adbd_as_root, which restarts
+    adbd, the daemon adb actually talks to on the device).
     """
 
     def __init__(self, backend: AdbBackend) -> None:
@@ -93,3 +138,34 @@ class ConnectionService:
         result = await self._backend.disconnect(host, port)
         output = (result.stdout + result.stderr).strip()
         return DisconnectResult(success=result.exit_code == 0, address=address, output=output)
+
+    async def restart_adbd_as_root(self, serial: str) -> RestartAdbdAsRootResult:
+        result = await self._backend.root(serial)
+        output = (result.stdout + result.stderr).strip()
+        # Check known adbd wordings first, regardless of exit code: their
+        # presence proves adbd was actually reached, which is the real signal
+        # — unlike `adb connect` (verified live, ADR-017, to exit 0
+        # unconditionally), this hasn't been independently verified live, so
+        # this doesn't assume any particular exit code accompanies these.
+        if "adbd is already running as root" in output:
+            return RestartAdbdAsRootResult(serial=serial, success=True, already_root=True, output=output)
+        if "restarting adbd as root" in output:
+            return RestartAdbdAsRootResult(serial=serial, success=True, already_root=False, output=output)
+        if "adbd cannot run as root in production builds" in output:
+            # A normal, expected Android answer on a non-debuggable build,
+            # not an error.
+            return RestartAdbdAsRootResult(serial=serial, success=False, already_root=False, output=output)
+        # No known adbd wording present — adbd was never reached at all.
+        # Classify by transport failure the same way shell-routed commands do
+        # (see user/service.py's _raise_for_shell_failure): an unknown serial
+        # fails at the adb-client level with "adb: device '<serial>' not
+        # found", exit 1.
+        if result.exit_code != 0:
+            message = output or "adb root command exited non-zero."
+            if "not found" in message:
+                raise DeviceNotFoundError(message, details={"serial": serial})
+            raise BackendError(message, details={"serial": serial, "exit_code": result.exit_code})
+        raise BackendError(
+            output or "adb root command exited successfully but returned unexpected output.",
+            details={"serial": serial},
+        )

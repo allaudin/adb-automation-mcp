@@ -363,3 +363,90 @@ async def test_stop_log_session_tool_without_local_root_returns_policy_error(
 
     assert stop_result.data.status == "error"
     assert stop_result.data.error.code == "POLICY_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_get_property_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "get_property", {"serial": "emulator-5554", "name": "ro.build.version.release"}
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.serial == "emulator-5554"
+    assert result.data.data.name == "ro.build.version.release"
+    assert result.data.data.value == "14"
+
+
+@pytest.mark.asyncio
+async def test_list_properties_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "list_properties", {"serial": "emulator-5554", "prefix": "ro.build."}
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.serial == "emulator-5554"
+    assert result.data.data.prefix == "ro.build."
+    assert len(result.data.data.properties) == 2
+
+
+@pytest.mark.asyncio
+async def test_get_property_metadata_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "get_property_metadata", {"serial": "emulator-5554", "name": "ro.build.version.release"}
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.serial == "emulator-5554"
+    assert result.data.data.value == "14"
+    assert result.data.data.declared_type == "build_prop"
+
+
+@pytest.mark.asyncio
+async def test_set_property_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "set_property",
+            {"serial": "emulator-5554", "name": "debug.myapp.loglevel", "value": "verbose"},
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.serial == "emulator-5554"
+    assert result.data.data.name == "debug.myapp.loglevel"
+    assert result.data.data.value == "verbose"
+
+
+@pytest.mark.asyncio
+async def test_set_property_tool_rejects_ctl_namespace_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "set_property", {"serial": "emulator-5554", "name": "ctl.start", "value": "some-service"}
+        )
+
+    assert result.data.status == "error"
+    assert result.data.error.code == "POLICY_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_set_property_tool_rejects_sys_powerctl_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "set_property", {"serial": "emulator-5554", "name": "sys.powerctl", "value": "shutdown"}
+        )
+
+    assert result.data.status == "error"
+    assert result.data.error.code == "POLICY_DENIED"

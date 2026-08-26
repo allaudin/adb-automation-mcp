@@ -1,7 +1,7 @@
 """The real AdbBackend implementation: executes adb as a subprocess.
 
-`list_devices`, `kill_server`, `start_server`, `connect`, `disconnect`, and `shell`
-are exercised by modules built so far (diagnostics, device_info, connection, user);
+`list_devices`, `kill_server`, `start_server`, `connect`, `disconnect`, `root`, and
+`shell` are exercised by modules built so far (diagnostics, device_info, connection, user);
 `install`, `uninstall`, `push`, and `pull` are implemented to the same standard but
 not yet used by any module. None of these have automated contract-test coverage
 against the real binary yet — verified manually against a real device instead.
@@ -103,6 +103,9 @@ class SubprocessBackend:
 
     async def disconnect(self, host: str, port: int) -> CommandResult:
         return await self._run("disconnect", f"{host}:{port}")
+
+    async def root(self, serial: str) -> CommandResult:
+        return await self._run("-s", serial, "root")
 
 
 def _parse_devices(stdout: str) -> list[DeviceInfo]:

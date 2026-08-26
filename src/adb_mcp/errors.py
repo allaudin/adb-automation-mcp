@@ -39,6 +39,14 @@ class DeviceNotFoundError(AdbError):
     code = "DEVICE_NOT_FOUND"
 
 
+class UserNotFoundError(AdbError):
+    """The device is reachable, but no Android user with the requested ID
+    exists on it.
+    """
+
+    code = "USER_NOT_FOUND"
+
+
 class AmbiguousDeviceError(AdbError):
     """A serial was omitted but more than one device is connected."""
 

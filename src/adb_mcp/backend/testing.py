@@ -26,6 +26,8 @@ class FakeBackend:
         connect_result: CommandResult | None = None,
         disconnect_result: CommandResult | None = None,
         shell_result: CommandResult | None = None,
+        dumpsys_user_result: CommandResult | None = None,
+        user_info_result: CommandResult | None = None,
     ) -> None:
         self._devices = devices or []
         self._unavailable = unavailable
@@ -50,6 +52,28 @@ class FakeBackend:
         self._shell_result = shell_result or CommandResult(
             stdout="0\n", stderr="", exit_code=0, duration_ms=45.0
         )
+        # Real `adb shell dumpsys user` output, trimmed to one UserInfo block
+        # (the real dump was ~1000 lines covering every user on the device).
+        self._dumpsys_user_result = dumpsys_user_result or CommandResult(
+            stdout=(
+                "Current user: 10\n"
+                "\n"
+                "Users:\n"
+                "  UserInfo{10:Driver:412} serialNo=10 isPrimary=false\n"
+                "    Type: android.os.usertype.full.SECONDARY\n"
+                "    Flags: 1042 (ADMIN|FULL|INITIALIZED)\n"
+                "    State: RUNNING_UNLOCKED\n"
+                "    Created: +3d9h55m0s649ms ago\n"
+                "    Last logged in: +3d9h54m53s394ms ago\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=90.0,
+        )
+        # None (the default) means "build a realistic single-user block for
+        # whatever user_id user_info() is actually called with" — see shell()
+        # below. A fixed override here is for simulating "User N not found".
+        self._user_info_result = user_info_result
 
     def _raise_if_unavailable(self) -> None:
         if self._unavailable:
@@ -65,6 +89,24 @@ class FakeBackend:
 
     async def shell(self, serial: str, command: str) -> CommandResult:
         self._raise_if_unavailable()
+        if command.startswith("dumpsys user --user "):
+            if self._user_info_result is not None:
+                return self._user_info_result
+            user_id = command.rsplit(" ", 1)[-1]
+            # Real adb wording/shape for a single filtered user block.
+            return CommandResult(
+                stdout=(
+                    f"  UserInfo{{{user_id}:Driver:412}} serialNo={user_id} isPrimary=false\n"
+                    "    Type: android.os.usertype.full.SECONDARY\n"
+                    "    Flags: 1042 (ADMIN|FULL|INITIALIZED)\n"
+                    "    State: RUNNING_UNLOCKED\n"
+                ),
+                stderr="",
+                exit_code=0,
+                duration_ms=60.0,
+            )
+        if command == "dumpsys user":
+            return self._dumpsys_user_result
         return self._shell_result
 
     async def install(self, serial: str, apk_path: str, flags: list[str]) -> CommandResult:

@@ -136,3 +136,28 @@ async def test_get_current_user_tool_round_trips_over_mcp_protocol() -> None:
     assert result.data.status == "success"
     assert result.data.data.serial == "emulator-5554"
     assert result.data.data.user_id == 0
+
+
+@pytest.mark.asyncio
+async def test_dump_user_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("dump_user", {"serial": "emulator-5554"})
+
+    assert result.data.status == "success"
+    assert result.data.data.serial == "emulator-5554"
+    assert "UserInfo" in result.data.data.output
+
+
+@pytest.mark.asyncio
+async def test_user_info_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("user_info", {"serial": "emulator-5554", "user_id": 10})
+
+    assert result.data.status == "success"
+    assert result.data.data.serial == "emulator-5554"
+    assert result.data.data.user_id == 10
+    assert "UserInfo{10:" in result.data.data.output

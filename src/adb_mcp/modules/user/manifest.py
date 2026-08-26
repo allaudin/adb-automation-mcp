@@ -6,12 +6,12 @@ registers at server startup.
 from __future__ import annotations
 
 from adb_mcp.modules.user.service import UserService
-from adb_mcp.modules.user.tools import get_current_user
+from adb_mcp.modules.user.tools import dump_user, get_current_user, user_info
 from adb_mcp.registry import ModuleManifest
 
 MODULE = ModuleManifest(
     name="user",
     service_factory=UserService,
-    tools=[get_current_user],
+    tools=[get_current_user, dump_user, user_info],
     resources=[],
 )

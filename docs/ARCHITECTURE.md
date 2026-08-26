@@ -29,12 +29,15 @@ An MCP server that exposes Android Debug Bridge (ADB) capabilities to MCP client
 **Current implementation status (2026-08-26):** four modules exist under
 `src/adb_mcp/modules/`: `diagnostics` (`check_adb_available`), `device_info`
 (`list_connected_devices`), `connection` (`restart_adb_server`,
-`connect_device`, `disconnect_device`), and `user` (`get_current_user` — the
-device's current Android user via `adb shell am get-current-user`). It passes
-`mypy --strict`, `ruff`, `pytest`, and has been verified end-to-end through a
-real `fastmcp` `Client` call, including against a real adb install for every
-module's failure paths (`restart_adb_server`/`connect_device`/
-`disconnect_device`/`get_current_user`). CI
+`connect_device`, `disconnect_device`), and `user` (`get_current_user` via
+`adb shell am get-current-user`; `dump_user` via `adb shell dumpsys user` — no
+per-user filter, since verified live that its optional userId argument has no
+effect at all; `user_info` via `adb shell dumpsys user --user ID`, which does
+genuinely filter to one user — verified live that `--user 0` and `--user 10`
+return different single-user blocks). It passes `mypy --strict`, `ruff`,
+`pytest`, and has been verified
+end-to-end through a real `fastmcp` `Client` call, including against a real
+adb install for every module's failure paths. CI
 (`.github/workflows/ci.yml`) runs lint, type-check, and tests on every push/PR to
 `main`, plus a strict `mkdocs build` and (on merge to `main`) a GitHub Pages deploy.
 Everything else described below — additional modules, release automation,

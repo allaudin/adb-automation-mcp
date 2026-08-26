@@ -1,0 +1,73 @@
+site_name: adb-mcp-server
+site_description: MCP server exposing Android Debug Bridge (ADB) capabilities as typed, documented tools and resources.
+site_url: https://allaudin.github.io/adb-mcp-server/
+repo_url: https://github.com/allaudin/adb-mcp-server
+repo_name: allaudin/adb-mcp-server
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+site_dir: site
+
+# ADR.md is a developer-facing decision log kept in docs/ for its
+# cross-references from ARCHITECTURE.md, but it isn't meant for the public
+# site — excluded from the build, not just the nav.
+exclude_docs: |
+  ADR.md
+
+nav:
+  - Home: index.md
+  - Architecture: ARCHITECTURE.md
+  - Tool Reference:
+      - diagnostics: reference/diagnostics.md
+      - device_info: reference/device_info.md
+      - connection: reference/connection.md
+  - Integrations:
+      - Claude Code: integrations/claude-code.md
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.top
+    - content.code.copy
+    - content.action.edit
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: true
+            show_root_heading: true
+            docstring_style: google
+            merge_init_into_class: true
+            show_signature_annotations: true
+            docstring_options:
+              # This project's docstrings (ADR-012) are deliberately narrative
+              # prose, tuned for LLM/human readability — not griffe's stricter
+              # "ExceptionType: description" structured Raises/Returns items.
+              # Suppress griffe's parsing warnings rather than reshaping the
+              # docstring convention around one tool's parser.
+              warnings: false

@@ -29,12 +29,10 @@ An MCP server that exposes Android Debug Bridge (ADB) capabilities to MCP client
 **Current implementation status (2026-08-26):** four modules exist under
 `src/adb_mcp/modules/`: `diagnostics` (`check_adb_available`), `device_info`
 (`list_connected_devices`), `connection` (`restart_adb_server`,
-`connect_device`, `disconnect_device`), and `user` (`get_current_user` via
-`adb shell am get-current-user`; `dump_user` via `adb shell dumpsys user` — no
-per-user filter, since verified live that its optional userId argument has no
-effect at all; `user_info` via `adb shell dumpsys user --user ID`, which does
-genuinely filter to one user — verified live that `--user 0` and `--user 10`
-return different single-user blocks). It passes `mypy --strict`, `ruff`,
+`connect_device`, `disconnect_device`), and `user` (`get_current_user`,
+`dump_user`, `user_info`, `list_users`, `switch_user` — see the Tool Reference
+site for exactly what each `adb shell` command is and its verified quirks).
+It passes `mypy --strict`, `ruff`,
 `pytest`, and has been verified
 end-to-end through a real `fastmcp` `Client` call, including against a real
 adb install for every module's failure paths. CI

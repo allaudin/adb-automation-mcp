@@ -10,7 +10,14 @@ from typing import cast
 
 from fastmcp import Context
 
-from adb_mcp.modules.user.service import CurrentUser, UserDump, UserInfo, UserService
+from adb_mcp.modules.user.service import (
+    CurrentUser,
+    SwitchUserResult,
+    UserDump,
+    UserInfo,
+    UserList,
+    UserService,
+)
 from adb_mcp.registry import category
 
 
@@ -101,8 +108,8 @@ async def user_info(ctx: Context, serial: str, user_id: int) -> UserInfo:
 
     Args:
         serial: The target device's adb serial (see list_connected_devices).
-        user_id: The Android user ID to look up (see get_current_user or
-            dump_user to find valid IDs on this device).
+        user_id: The Android user ID to look up (see list_users to find valid
+            IDs on this device).
 
     Returns:
         The requested user's raw dumpsys block, plus the serial and user_id
@@ -137,3 +144,99 @@ async def user_info(ctx: Context, serial: str, user_id: int) -> UserInfo:
     services = cast("dict[str, object]", ctx.lifespan_context["services"])
     user = cast(UserService, services["user"])
     return await user.user_info(serial, user_id)
+
+
+@category("read")
+async def list_users(ctx: Context, serial: str) -> UserList:
+    """List every Android user on a device: `adb shell cmd user list -v`.
+
+    Structured, one entry per user (id, name, type, flags, and states like
+    "running"/"current"/"visible") — the fastest way to see what user IDs
+    actually exist before calling user_info or switch_user with one.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+
+    Returns:
+        The device's serial and every user currently defined on it.
+
+    Error handling:
+        Propagates the same way most tools do (unlike check_adb_available): if
+        the adb binary itself can't be found or is unresponsive, or the
+        serial doesn't match a connected device, that surfaces as an actual
+        tool error.
+
+    Example:
+        Called with serial="emulator-5554". A typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "2 users on emulator-5554.",
+          "data": {
+            "serial": "emulator-5554",
+            "users": [
+              {
+                "user_id": 0,
+                "name": "System User",
+                "type": "system.HEADLESS",
+                "flags": ["INITIALIZED", "PRIMARY", "SYSTEM"],
+                "states": ["running"]
+              },
+              {
+                "user_id": 10,
+                "name": "Driver",
+                "type": "full.SECONDARY",
+                "flags": ["ADMIN", "FULL", "INITIALIZED"],
+                "states": ["running", "current", "visible"]
+              }
+            ]
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    user = cast(UserService, services["user"])
+    return await user.list_users(serial)
+
+
+@category("write")
+async def switch_user(ctx: Context, serial: str, user_id: int) -> SwitchUserResult:
+    """Switch the active Android user on a device: `adb shell am switch-user ID`.
+
+    Changes what's actually running in the foreground on the device — not a
+    read, and not safely re-invocable without consequence (it interrupts
+    whatever the current user was doing). Use list_users first to find a
+    valid target user ID.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+        user_id: The Android user ID to switch to (see list_users).
+
+    Returns:
+        The serial and user_id switched to. Only returned on success —
+        see Error handling below.
+
+    Error handling:
+        Unlike connect_device, `am switch-user`'s exit code was verified live
+        to be reliable, so failure is a real tool error, not success:false
+        data: an invalid user_id fails with "Error: Failed to switch to user
+        <id>", exit code 1 — same as an unreachable serial or an unresponsive
+        adb binary.
+
+    Example:
+        Called with serial="emulator-5554", user_id=0. A typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "Switched to user 0 on emulator-5554.",
+          "data": {"serial": "emulator-5554", "user_id": 0},
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    user = cast(UserService, services["user"])
+    return await user.switch_user(serial, user_id)

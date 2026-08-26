@@ -28,6 +28,8 @@ class FakeBackend:
         shell_result: CommandResult | None = None,
         dumpsys_user_result: CommandResult | None = None,
         user_info_result: CommandResult | None = None,
+        list_users_result: CommandResult | None = None,
+        switch_user_result: CommandResult | None = None,
     ) -> None:
         self._devices = devices or []
         self._unavailable = unavailable
@@ -74,6 +76,24 @@ class FakeBackend:
         # whatever user_id user_info() is actually called with" — see shell()
         # below. A fixed override here is for simulating "User N not found".
         self._user_info_result = user_info_result
+        # Real `adb shell cmd user list -v` output, captured from an actual run.
+        self._list_users_result = list_users_result or CommandResult(
+            stdout=(
+                "2 users:\n"
+                "\n"
+                "0: id=0, name=System User, type=system.HEADLESS, "
+                "flags=INITIALIZED|PRIMARY|SYSTEM (running)\n"
+                "1: id=10, name=Driver, type=full.SECONDARY, "
+                "flags=ADMIN|FULL|INITIALIZED (running) (current) (visible)\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=55.0,
+        )
+        # Real `adb shell am switch-user N` success output: empty stdout, exit 0.
+        self._switch_user_result = switch_user_result or CommandResult(
+            stdout="", stderr="", exit_code=0, duration_ms=100.0
+        )
 
     def _raise_if_unavailable(self) -> None:
         if self._unavailable:
@@ -107,6 +127,10 @@ class FakeBackend:
             )
         if command == "dumpsys user":
             return self._dumpsys_user_result
+        if command == "cmd user list -v":
+            return self._list_users_result
+        if command.startswith("am switch-user "):
+            return self._switch_user_result
         return self._shell_result
 
     async def install(self, serial: str, apk_path: str, flags: list[str]) -> CommandResult:

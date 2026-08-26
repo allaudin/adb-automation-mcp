@@ -14,7 +14,15 @@ from adb_mcp.errors import (
     DeviceNotFoundError,
     UserNotFoundError,
 )
-from adb_mcp.modules.user.service import CurrentUser, UserDump, UserInfo, UserService
+from adb_mcp.modules.user.service import (
+    CurrentUser,
+    SwitchUserResult,
+    UserDump,
+    UserInfo,
+    UserList,
+    UserListEntry,
+    UserService,
+)
 
 
 @pytest.mark.asyncio
@@ -195,3 +203,134 @@ def test_user_info_summary_mentions_user_id_and_char_count() -> None:
     assert "10" in summary
     assert "emulator-5554" in summary
     assert "50" in summary
+
+
+@pytest.mark.asyncio
+async def test_list_users__parses_real_cmd_user_list_output() -> None:
+    service = UserService(FakeBackend())
+
+    result = await service.list_users("emulator-5554")
+
+    assert result.serial == "emulator-5554"
+    assert len(result.users) == 2
+    system_user, driver = result.users
+    assert system_user == UserListEntry(
+        user_id=0,
+        name="System User",
+        type="system.HEADLESS",
+        flags=["INITIALIZED", "PRIMARY", "SYSTEM"],
+        states=["running"],
+    )
+    assert driver == UserListEntry(
+        user_id=10,
+        name="Driver",
+        type="full.SECONDARY",
+        flags=["ADMIN", "FULL", "INITIALIZED"],
+        states=["running", "current", "visible"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_users__single_user_device() -> None:
+    backend = FakeBackend(
+        list_users_result=CommandResult(
+            stdout=(
+                "1 users:\n\n"
+                "0: id=0, name=Owner, type=full.SYSTEM, flags=INITIALIZED|PRIMARY|ADMIN"
+                "|SYSTEM (running) (current) (visible)\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=40.0,
+        )
+    )
+    service = UserService(backend)
+
+    result = await service.list_users("emulator-5554")
+
+    assert len(result.users) == 1
+    assert result.users[0].user_id == 0
+    assert result.users[0].name == "Owner"
+
+
+@pytest.mark.asyncio
+async def test_list_users__unknown_serial_raises_device_not_found() -> None:
+    backend = FakeBackend(
+        list_users_result=CommandResult(
+            stdout="", stderr="adb: device 'bogus' not found\n", exit_code=1, duration_ms=10.0
+        )
+    )
+    service = UserService(backend)
+
+    with pytest.raises(DeviceNotFoundError):
+        await service.list_users("bogus")
+
+
+@pytest.mark.asyncio
+async def test_list_users__adb_unavailable_propagates_as_error() -> None:
+    service = UserService(FakeBackend(unavailable=True))
+
+    with pytest.raises(AdbUnavailableError):
+        await service.list_users("emulator-5554")
+
+
+def test_user_list_summary_pluralizes_correctly() -> None:
+    assert "1 user " in UserList(serial="s", users=[_entry(0)]).summary() + " "
+    assert "2 users" in UserList(serial="s", users=[_entry(0), _entry(1)]).summary()
+    assert "0 users" in UserList(serial="s", users=[]).summary()
+
+
+def _entry(user_id: int) -> UserListEntry:
+    return UserListEntry(user_id=user_id, name="x", type="t", flags=[], states=[])
+
+
+@pytest.mark.asyncio
+async def test_switch_user__success_returns_serial_and_user_id() -> None:
+    service = UserService(FakeBackend())
+
+    result = await service.switch_user("emulator-5554", 0)
+
+    assert result.serial == "emulator-5554"
+    assert result.user_id == 0
+
+
+@pytest.mark.asyncio
+async def test_switch_user__invalid_user_raises_backend_error() -> None:
+    # Real adb behavior, verified live: exit 1, "Error: Failed to switch to
+    # user <id>" — unlike connect/dumpsys quirks, this exit code IS reliable.
+    backend = FakeBackend(
+        switch_user_result=CommandResult(
+            stdout="", stderr="Error: Failed to switch to user 9999", exit_code=1, duration_ms=50.0
+        )
+    )
+    service = UserService(backend)
+
+    with pytest.raises(BackendError):
+        await service.switch_user("emulator-5554", 9999)
+
+
+@pytest.mark.asyncio
+async def test_switch_user__unknown_serial_raises_device_not_found() -> None:
+    backend = FakeBackend(
+        switch_user_result=CommandResult(
+            stdout="", stderr="adb: device 'bogus' not found\n", exit_code=1, duration_ms=10.0
+        )
+    )
+    service = UserService(backend)
+
+    with pytest.raises(DeviceNotFoundError):
+        await service.switch_user("bogus", 0)
+
+
+@pytest.mark.asyncio
+async def test_switch_user__adb_unavailable_propagates_as_error() -> None:
+    service = UserService(FakeBackend(unavailable=True))
+
+    with pytest.raises(AdbUnavailableError):
+        await service.switch_user("emulator-5554", 0)
+
+
+def test_switch_user_result_summary_mentions_user_id() -> None:
+    summary = SwitchUserResult(serial="emulator-5554", user_id=0).summary()
+    assert "0" in summary
+    assert "emulator-5554" in summary

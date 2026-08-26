@@ -37,6 +37,8 @@ class FakeBackend:
         get_log_buffer_size_result: CommandResult | None = None,
         pidof_result: CommandResult | None = None,
         package_logs_result: CommandResult | None = None,
+        log_session_anchor_result: CommandResult | None = None,
+        log_session_stop_result: CommandResult | None = None,
     ) -> None:
         self._devices = devices or []
         self._unavailable = unavailable
@@ -157,6 +159,32 @@ class FakeBackend:
             exit_code=0,
             duration_ms=70.0,
         )
+        # Real `adb shell logcat -d -t 1 -b main -v epoch` output for
+        # start_log_session's anchor probe, captured from an actual run.
+        self._log_session_anchor_result = log_session_anchor_result or CommandResult(
+            stdout=(
+                "--------- beginning of main\n"
+                "         1787727659.552   548   548 I adbd    : adbd service "
+                "requested 'shell,v2,TERM=xterm-256color,raw:logcat -d -t 1 -b main -v epoch'\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=40.0,
+        )
+        # Real `adb shell logcat -d -v threadtime -b main -t <anchor>` output
+        # for stop_log_session's replay, captured from an actual run (trimmed).
+        self._log_session_stop_result = log_session_stop_result or CommandResult(
+            stdout=(
+                "--------- beginning of main\n"
+                "08-26 09:00:59.552   548   548 I adbd    : adbd service requested "
+                "'shell,v2,TERM=xterm-256color,raw:logcat -d -t 1 -b main -v epoch'\n"
+                "08-26 09:00:59.596   462 11426 E audio_hw_generic_caremu: "
+                "mixer_thread_loop error[-1] writing data to pcm\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=90.0,
+        )
 
     def _raise_if_unavailable(self) -> None:
         if self._unavailable:
@@ -198,6 +226,10 @@ class FakeBackend:
             return self._create_user_result
         if command.startswith("pm remove-user "):
             return self._remove_user_result
+        if command.startswith("logcat -d -t 1 -b ") and command.endswith("-v epoch"):
+            return self._log_session_anchor_result
+        if command.startswith("logcat -d -v threadtime -b "):
+            return self._log_session_stop_result
         if command.startswith("logcat -d ") and "--pid=" in command:
             return self._package_logs_result
         if command.startswith("logcat -d "):

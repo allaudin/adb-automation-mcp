@@ -100,3 +100,20 @@ class PolicyViolationError(AdbError):
     """
 
     code = "POLICY_DENIED"
+
+
+class LogSessionNotFoundError(AdbError):
+    """No active log session matches the requested session_id — it was never
+    started, or was already stopped.
+    """
+
+    code = "LOG_SESSION_NOT_FOUND"
+
+
+class InvalidArgumentError(AdbError):
+    """A caller-supplied argument combination is self-contradictory (e.g. two
+    mutually exclusive optional parameters both set) — a bad call, not an adb
+    or device failure.
+    """
+
+    code = "INVALID_ARGUMENT"

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -275,3 +276,90 @@ async def test_read_package_logs_tool_round_trips_over_mcp_protocol() -> None:
     assert result.data.data.serial == "emulator-5554"
     assert result.data.data.package == "com.android.systemui"
     assert result.data.data.pid == 19861
+
+
+@pytest.mark.asyncio
+async def test_start_log_session_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("start_log_session", {"serial": "emulator-5554", "name": "test-session"})
+
+    assert result.data.status == "success"
+    assert result.data.data.serial == "emulator-5554"
+    assert result.data.data.buffer == "main"
+    assert result.data.data.session_id
+
+
+@pytest.mark.asyncio
+async def test_start_then_stop_log_session_tool_round_trips_over_mcp_protocol(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ADB_MCP_LOCAL_ROOT", str(tmp_path))
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        start_result = await client.call_tool("start_log_session", {"serial": "emulator-5554", "name": "test-session"})
+        session_id = start_result.data.data.session_id
+
+        stop_result = await client.call_tool(
+            "stop_log_session", {"session_id": session_id, "local_path": "session1.log"}
+        )
+
+    assert stop_result.data.status == "success"
+    assert stop_result.data.data.local_path == str(tmp_path / "session1.log")
+    assert (tmp_path / "session1.log").exists()
+    assert "beginning of main" in (tmp_path / "session1.log").read_text()
+
+
+@pytest.mark.asyncio
+async def test_start_log_session_tool_package_resolves_pid() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "start_log_session",
+            {"serial": "emulator-5554", "name": "test-session", "package": "com.android.systemui"},
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.pid == 19861
+    assert result.data.data.package == "com.android.systemui"
+
+
+@pytest.mark.asyncio
+async def test_start_log_session_tool_pid_and_package_together_returns_invalid_argument() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "start_log_session",
+            {
+                "serial": "emulator-5554",
+                "name": "test-session",
+                "pid": 725,
+                "package": "com.android.systemui",
+            },
+        )
+
+    assert result.data.status == "error"
+    assert result.data.error.code == "INVALID_ARGUMENT"
+
+
+@pytest.mark.asyncio
+async def test_stop_log_session_tool_without_local_root_returns_policy_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("ADB_MCP_LOCAL_ROOT", raising=False)
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        start_result = await client.call_tool("start_log_session", {"serial": "emulator-5554", "name": "test-session"})
+        session_id = start_result.data.data.session_id
+
+        stop_result = await client.call_tool(
+            "stop_log_session", {"session_id": session_id, "local_path": "session1.log"}
+        )
+
+    assert stop_result.data.status == "error"
+    assert stop_result.data.error.code == "POLICY_DENIED"

@@ -32,8 +32,12 @@ An MCP server that exposes Android Debug Bridge (ADB) capabilities to MCP client
 `connect_device`, `disconnect_device`), `user` (`get_current_user`,
 `dump_user`, `user_info`, `list_users`, `switch_user`, `create_user`,
 `remove_user`), and `logger` (`read_logs`, `clear_logs`,
-`get_log_buffer_size`, `read_package_logs` — see the Tool Reference site for
-exactly what each `adb shell` command is and its verified quirks).
+`get_log_buffer_size`, `read_package_logs`, `start_log_session`,
+`stop_log_session` — see the Tool Reference site for exactly what each `adb
+shell` command is and its verified quirks). `stop_log_session` is the first
+tool that writes to the host filesystem; it's gated by a call-time
+`local_root` check (`ADB_MCP_LOCAL_ROOT`) — no default, refuses to run until
+an operator sets it.
 It passes `mypy --strict`, `ruff`,
 `pytest`, and has been verified
 end-to-end through a real `fastmcp` `Client` call, including against a real

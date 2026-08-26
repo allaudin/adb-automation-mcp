@@ -4,6 +4,8 @@ registration, no event-loop server startup, just the service.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from adb_mcp.backend.protocol import CommandResult
@@ -12,13 +14,18 @@ from adb_mcp.errors import (
     AdbUnavailableError,
     BackendError,
     DeviceNotFoundError,
+    InvalidArgumentError,
+    LogSessionNotFoundError,
     PackageNotRunningError,
+    PolicyViolationError,
 )
 from adb_mcp.modules.logger.service import (
     ClearLogsResult,
     LogBufferSize,
     LogDump,
     LoggerService,
+    LogSessionHandle,
+    LogSessionResult,
     PackageLogDump,
 )
 
@@ -333,3 +340,334 @@ def test_package_log_dump_summary_mentions_package_and_pid() -> None:
     assert "com.android.systemui" in summary
     assert "19861" in summary
     assert "2" in summary
+
+
+@pytest.mark.asyncio
+async def test_start_log_session__returns_handle_with_new_session_id() -> None:
+    service = LoggerService(FakeBackend())
+
+    handle = await service.start_log_session("emulator-5554", "test-session", buffer="main")
+
+    assert handle.serial == "emulator-5554"
+    assert handle.buffer == "main"
+    assert handle.session_id
+    assert handle.name == "test-session"
+    assert handle.pid is None
+    assert handle.package is None
+
+
+@pytest.mark.asyncio
+async def test_start_log_session__pid_is_echoed_back_in_handle() -> None:
+    service = LoggerService(FakeBackend())
+
+    handle = await service.start_log_session("emulator-5554", "test-session", pid=725)
+
+    assert handle.pid == 725
+    assert handle.package is None
+
+
+@pytest.mark.asyncio
+async def test_start_log_session__package_resolves_to_pid_in_handle() -> None:
+    service = LoggerService(FakeBackend())  # default pidof_result stdout="19861\n"
+
+    handle = await service.start_log_session(
+        "emulator-5554", "test-session", package="com.android.systemui"
+    )
+
+    assert handle.pid == 19861
+    assert handle.package == "com.android.systemui"
+
+
+@pytest.mark.asyncio
+async def test_start_log_session__package_not_running_raises_package_not_running() -> None:
+    backend = FakeBackend(pidof_result=CommandResult(stdout="", stderr="", exit_code=1, duration_ms=20.0))
+    service = LoggerService(backend)
+
+    with pytest.raises(PackageNotRunningError):
+        await service.start_log_session("emulator-5554", "test-session", package="com.bogus.doesnotexist")
+
+
+@pytest.mark.asyncio
+async def test_start_log_session__pid_and_package_together_raises_invalid_argument() -> None:
+    service = LoggerService(FakeBackend())
+
+    with pytest.raises(InvalidArgumentError):
+        await service.start_log_session(
+            "emulator-5554", "test-session", pid=725, package="com.android.systemui"
+        )
+
+
+@pytest.mark.asyncio
+async def test_start_log_session__two_calls_get_distinct_session_ids() -> None:
+    service = LoggerService(FakeBackend())
+
+    first = await service.start_log_session("emulator-5554", "test-session")
+    second = await service.start_log_session("emulator-5554", "test-session")
+
+    assert first.session_id != second.session_id
+
+
+@pytest.mark.asyncio
+async def test_start_log_session__unknown_serial_raises_device_not_found() -> None:
+    backend = FakeBackend(
+        log_session_anchor_result=CommandResult(
+            stdout="", stderr="adb: device 'bogus' not found\n", exit_code=1, duration_ms=10.0
+        )
+    )
+    service = LoggerService(backend)
+
+    with pytest.raises(DeviceNotFoundError):
+        await service.start_log_session("bogus", "test-session")
+
+
+@pytest.mark.asyncio
+async def test_start_log_session__adb_unavailable_propagates_as_error() -> None:
+    service = LoggerService(FakeBackend(unavailable=True))
+
+    with pytest.raises(AdbUnavailableError):
+        await service.start_log_session("emulator-5554", "test-session")
+
+
+def test_log_session_handle_summary_mentions_session_id_name_and_buffer() -> None:
+    summary = LogSessionHandle(
+        session_id="abc123", serial="emulator-5554", buffer="main", name="wifi_repro", pid=None, package=None
+    ).summary()
+    assert "abc123" in summary
+    assert "wifi_repro" in summary
+    assert "main" in summary
+    assert "emulator-5554" in summary
+
+
+@pytest.mark.asyncio
+async def test_stop_log_session__writes_captured_output_to_local_path(tmp_path: Path) -> None:
+    service = LoggerService(FakeBackend(), local_root=tmp_path)
+    handle = await service.start_log_session("emulator-5554", "test-session")
+
+    result = await service.stop_log_session(handle.session_id, "session1.log")
+
+    assert result.session_id == handle.session_id
+    assert result.serial == "emulator-5554"
+    assert result.buffer == "main"
+    assert result.local_path == str(tmp_path / "session1.log")
+    assert result.line_count > 0
+    written = (tmp_path / "session1.log").read_text()
+    assert "beginning of main" in written
+
+
+@pytest.mark.asyncio
+async def test_stop_log_session__second_stop_raises_session_not_found(tmp_path: Path) -> None:
+    service = LoggerService(FakeBackend(), local_root=tmp_path)
+    handle = await service.start_log_session("emulator-5554", "test-session")
+    await service.stop_log_session(handle.session_id, "session1.log")
+
+    with pytest.raises(LogSessionNotFoundError):
+        await service.stop_log_session(handle.session_id, "session2.log")
+
+
+@pytest.mark.asyncio
+async def test_stop_log_session__unknown_session_id_raises_session_not_found(tmp_path: Path) -> None:
+    service = LoggerService(FakeBackend(), local_root=tmp_path)
+
+    with pytest.raises(LogSessionNotFoundError):
+        await service.stop_log_session("does-not-exist", "session1.log")
+
+
+@pytest.mark.asyncio
+async def test_stop_log_session__no_local_root_configured_raises_policy_violation() -> None:
+    service = LoggerService(FakeBackend())  # local_root omitted
+    handle = await service.start_log_session("emulator-5554", "test-session")
+
+    with pytest.raises(PolicyViolationError):
+        await service.stop_log_session(handle.session_id, "session1.log")
+
+
+@pytest.mark.asyncio
+async def test_stop_log_session__path_escaping_local_root_raises_policy_violation(
+    tmp_path: Path,
+) -> None:
+    service = LoggerService(FakeBackend(), local_root=tmp_path)
+    handle = await service.start_log_session("emulator-5554", "test-session")
+
+    with pytest.raises(PolicyViolationError):
+        await service.stop_log_session(handle.session_id, "../outside.log")
+
+
+@pytest.mark.asyncio
+async def test_stop_log_session__absolute_path_outside_local_root_raises_policy_violation(
+    tmp_path: Path,
+) -> None:
+    service = LoggerService(FakeBackend(), local_root=tmp_path)
+    handle = await service.start_log_session("emulator-5554", "test-session")
+
+    with pytest.raises(PolicyViolationError):
+        await service.stop_log_session(handle.session_id, "/etc/passwd")
+
+
+@pytest.mark.asyncio
+async def test_stop_log_session__policy_violation_leaves_session_open(tmp_path: Path) -> None:
+    # A rejected local_path shouldn't consume the session — the caller should
+    # be able to retry with a valid path.
+    service = LoggerService(FakeBackend(), local_root=tmp_path)
+    handle = await service.start_log_session("emulator-5554", "test-session")
+
+    with pytest.raises(PolicyViolationError):
+        await service.stop_log_session(handle.session_id, "../outside.log")
+
+    result = await service.stop_log_session(handle.session_id, "session1.log")
+    assert result.session_id == handle.session_id
+
+
+@pytest.mark.asyncio
+async def test_stop_log_session__empty_buffer_at_start_omits_time_filter(tmp_path: Path) -> None:
+    # Verified live: -t 1 -v epoch returns empty stdout, exit 0, on an empty
+    # buffer — no anchor line to parse, so since=None and stop_log_session
+    # must not send a -t flag at all (there's nothing to anchor on).
+    captured: list[str] = []
+
+    class RecordingBackend(FakeBackend):
+        async def shell(self, serial: str, command: str) -> CommandResult:
+            captured.append(command)
+            return await super().shell(serial, command)
+
+    backend = RecordingBackend(
+        log_session_anchor_result=CommandResult(stdout="", stderr="", exit_code=0, duration_ms=10.0)
+    )
+    service = LoggerService(backend, local_root=tmp_path)
+    handle = await service.start_log_session("emulator-5554", "test-session", buffer="crash")
+
+    await service.stop_log_session(handle.session_id, "session1.log")
+
+    assert captured[1] == "logcat -d -v threadtime -b crash"
+
+
+@pytest.mark.asyncio
+async def test_stop_log_session__anchor_is_passed_to_replay_command(tmp_path: Path) -> None:
+    captured: list[str] = []
+
+    class RecordingBackend(FakeBackend):
+        async def shell(self, serial: str, command: str) -> CommandResult:
+            captured.append(command)
+            return await super().shell(serial, command)
+
+    backend = RecordingBackend(
+        log_session_anchor_result=CommandResult(
+            stdout="         1787727659.552   548   548 I adbd    : hello\n",
+            stderr="",
+            exit_code=0,
+            duration_ms=10.0,
+        )
+    )
+    service = LoggerService(backend, local_root=tmp_path)
+    handle = await service.start_log_session("emulator-5554", "test-session", buffer="main")
+
+    await service.stop_log_session(handle.session_id, "session1.log")
+
+    assert captured[1] == "logcat -d -v threadtime -b main -t 1787727659.552"
+
+
+@pytest.mark.asyncio
+async def test_stop_log_session__pid_configured_at_start_is_applied_at_replay(tmp_path: Path) -> None:
+    captured: list[str] = []
+
+    class RecordingBackend(FakeBackend):
+        async def shell(self, serial: str, command: str) -> CommandResult:
+            captured.append(command)
+            return await super().shell(serial, command)
+
+    service = LoggerService(RecordingBackend(), local_root=tmp_path)
+    handle = await service.start_log_session("emulator-5554", "test-session", buffer="main", pid=725)
+
+    await service.stop_log_session(handle.session_id, "session1.log")
+
+    assert "--pid=725" in captured[1]
+
+
+@pytest.mark.asyncio
+async def test_stop_log_session__package_configured_at_start_resolves_pid_and_applies_at_replay(
+    tmp_path: Path,
+) -> None:
+    captured: list[str] = []
+
+    class RecordingBackend(FakeBackend):
+        async def shell(self, serial: str, command: str) -> CommandResult:
+            captured.append(command)
+            return await super().shell(serial, command)
+
+    service = LoggerService(RecordingBackend(), local_root=tmp_path)  # default pidof -> 19861
+    handle = await service.start_log_session(
+        "emulator-5554", "test-session", package="com.android.systemui"
+    )
+
+    result = await service.stop_log_session(handle.session_id, "session1.log")
+
+    assert "--pid=19861" in captured[2]  # captured[0]=pidof, [1]=anchor probe, [2]=replay
+    assert result.pid == 19861
+    assert result.package == "com.android.systemui"
+
+
+@pytest.mark.asyncio
+async def test_stop_log_session__tag_and_min_priority_configured_at_start_are_applied_at_replay(
+    tmp_path: Path,
+) -> None:
+    captured: list[str] = []
+
+    class RecordingBackend(FakeBackend):
+        async def shell(self, serial: str, command: str) -> CommandResult:
+            captured.append(command)
+            return await super().shell(serial, command)
+
+    service = LoggerService(RecordingBackend(), local_root=tmp_path)
+    handle = await service.start_log_session(
+        "emulator-5554", "test-session", tag="WifiManager", min_priority="D"
+    )
+
+    await service.stop_log_session(handle.session_id, "session1.log")
+
+    assert "WifiManager:D *:S" in captured[1]
+
+
+def test_log_session_result_name_pid_package_round_trip() -> None:
+    result = LogSessionResult(
+        session_id="abc123",
+        serial="emulator-5554",
+        buffer="main",
+        name="wifi_repro",
+        pid=19861,
+        package="com.android.systemui",
+        local_path="/tmp/session1.log",
+        line_count=5,
+        duration_s=1.0,
+    )
+    assert result.pid == 19861
+    assert result.package == "com.android.systemui"
+
+
+@pytest.mark.asyncio
+async def test_stop_log_session__unknown_serial_raises_device_not_found(tmp_path: Path) -> None:
+    backend = FakeBackend(
+        log_session_stop_result=CommandResult(
+            stdout="", stderr="adb: device 'bogus' not found\n", exit_code=1, duration_ms=10.0
+        )
+    )
+    service = LoggerService(backend, local_root=tmp_path)
+    handle = await service.start_log_session("bogus", "test-session")
+
+    with pytest.raises(DeviceNotFoundError):
+        await service.stop_log_session(handle.session_id, "session1.log")
+
+
+def test_log_session_result_summary_mentions_name_line_count_and_path() -> None:
+    summary = LogSessionResult(
+        session_id="abc123",
+        serial="emulator-5554",
+        buffer="main",
+        name="wifi_repro",
+        pid=None,
+        package=None,
+        local_path="/tmp/session1.log",
+        line_count=42,
+        duration_s=10.5,
+    ).summary()
+    assert "42" in summary
+    assert "wifi_repro" in summary
+    assert "/tmp/session1.log" in summary

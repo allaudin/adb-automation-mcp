@@ -9,6 +9,8 @@ Env vars read at startup:
     ADB_MCP_TIMEOUT_S          per-command timeout in seconds (default: 10)
     ADB_MCP_ALLOW_DESTRUCTIVE=1  flip the default policy posture to also allow destructive
                                  tools (e.g. remove_user); denied by default
+    ADB_MCP_LOCAL_ROOT         host directory stop_log_session's local_path must resolve
+                                 inside; unset means that tool refuses to write anywhere
 """
 
 from __future__ import annotations

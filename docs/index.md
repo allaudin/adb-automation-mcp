@@ -26,6 +26,7 @@ By default this talks to the `adb` binary found on `PATH`. Configure it with env
 | `ADB_MCP_ADB_PATH` | Explicit path to the `adb` binary | unset (resolved via `PATH`) |
 | `ADB_MCP_TIMEOUT_S` | Per-command timeout, in seconds | `10` |
 | `ADB_MCP_ALLOW_DESTRUCTIVE=1` | Opt in to `destructive`-category tools | unset (denied by default) — no destructive tools exist yet, so this currently has no effect |
+| `ADB_MCP_LOCAL_ROOT` | Host directory `stop_log_session`'s/`pull_file`'s `local_path` must resolve inside | unset — those tools refuse to write anywhere until set |
 
 `ADB_MCP_ADB_PATH` matters more than it might seem: an MCP client (Claude Code, Claude
 Desktop, ...) launches this server with a minimal environment that usually does **not**

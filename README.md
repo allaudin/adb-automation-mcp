@@ -3,7 +3,7 @@
 <!-- mcp-name: io.github.allaudin/adb-mcp-server -->
 
 [![CI](https://github.com/allaudin/adb-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/allaudin/adb-mcp-server/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/android-adb-mcp.svg)](https://pypi.org/project/android-adb-mcp/)
+[![PyPI](https://img.shields.io/pypi/v/android-adb-mcp.svg?cacheSeconds=3600)](https://pypi.org/project/android-adb-mcp/)
 
 An MCP server exposing Android Debug Bridge (ADB) capabilities as typed, documented
 tools and resources.

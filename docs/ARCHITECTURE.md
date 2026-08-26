@@ -3,7 +3,7 @@
 This describes the system as it currently stands: what exists, how a process boots,
 and how the pieces work together.
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
 
 ## 1. Overview
 
@@ -69,6 +69,25 @@ they were added) — worth a real-device check before relying on
 `main`, plus a strict `mkdocs build` and (on merge to `main`) a GitHub Pages deploy.
 Everything else described below — additional modules, release automation,
 emulator integration — is the target shape, not yet built.
+
+**Package install/uninstall (2026-08-26):** the `packages` module (previously
+`list_packages` only) gained `install_apk`, `uninstall_package`, and
+`install_existing_for_user`. Semantic MCP options (`replace_existing`,
+`allow_downgrade`, `grant_runtime_permissions`, `allow_test_packages`,
+`force_sdk`, `user_id`, `keep_data`, `version_code`) map to adb/pm's own
+supported install/uninstall flags — no raw flag string is ever accepted from
+a client. `install_apk` reuses `AdbBackend.install`'s existing
+`(serial, apk_path, flags: list[str])` contract unchanged; `uninstall_package`
+and `install_existing_for_user` go through `AdbBackend.shell` (the same route
+`list_packages`/`grant_permission`/`clear_app_cache` already use for `pm`
+subcommands) rather than extending `AdbBackend.uninstall`, since that
+primitive's `(serial, package, keep_data)` signature has no way to express
+`--user`/`--versionCode` — `AdbBackend` itself was not changed. Not verified
+live (no device was available when these were added) — shaped on documented
+`adb install`/`PackageManagerShellCommand` output conventions, same caveat as
+`system_properties`/`get_user_capabilities` above; worth a real-device check
+before relying on exact `Failure [REASON]`/missing-user wording in
+production.
 
 ## 2. Component Architecture
 

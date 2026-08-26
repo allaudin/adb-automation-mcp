@@ -6,12 +6,17 @@ registers at server startup.
 from __future__ import annotations
 
 from adb_mcp.modules.packages.service import PackagesService
-from adb_mcp.modules.packages.tools import list_packages
+from adb_mcp.modules.packages.tools import (
+    install_apk,
+    install_existing_for_user,
+    list_packages,
+    uninstall_package,
+)
 from adb_mcp.registry import ModuleManifest
 
 MODULE = ModuleManifest(
     name="packages",
     service_factory=PackagesService,
-    tools=[list_packages],
+    tools=[list_packages, install_apk, uninstall_package, install_existing_for_user],
     resources=[],
 )

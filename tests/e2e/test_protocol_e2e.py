@@ -124,3 +124,15 @@ async def test_disconnect_device_tool_round_trips_over_mcp_protocol() -> None:
     assert result.data.status == "success"
     assert result.data.data.success is True
     assert result.data.data.address == "192.168.1.50:5555"
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("get_current_user", {"serial": "emulator-5554"})
+
+    assert result.data.status == "success"
+    assert result.data.data.serial == "emulator-5554"
+    assert result.data.data.user_id == 0

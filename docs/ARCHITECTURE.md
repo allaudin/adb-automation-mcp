@@ -26,13 +26,15 @@ An MCP server that exposes Android Debug Bridge (ADB) capabilities to MCP client
 - Per-user or per-identity RBAC. The policy layer governs which tools exist at all on
   a given server instance, not who is calling it.
 
-**Current implementation status (2026-08-26):** three modules exist under
+**Current implementation status (2026-08-26):** four modules exist under
 `src/adb_mcp/modules/`: `diagnostics` (`check_adb_available`), `device_info`
-(`list_connected_devices`), and `connection` (`restart_adb_server`,
-`connect_device`, `disconnect_device`). It passes `mypy --strict`, `ruff`,
-`pytest`, and has been verified end-to-end through a real `fastmcp` `Client`
-call (and, for `restart_adb_server`/`connect_device`/`disconnect_device`'s
-failure paths, against a real adb install). CI
+(`list_connected_devices`), `connection` (`restart_adb_server`,
+`connect_device`, `disconnect_device`), and `user` (`get_current_user` — the
+device's current Android user via `adb shell am get-current-user`). It passes
+`mypy --strict`, `ruff`, `pytest`, and has been verified end-to-end through a
+real `fastmcp` `Client` call, including against a real adb install for every
+module's failure paths (`restart_adb_server`/`connect_device`/
+`disconnect_device`/`get_current_user`). CI
 (`.github/workflows/ci.yml`) runs lint, type-check, and tests on every push/PR to
 `main`, plus a strict `mkdocs build` and (on merge to `main`) a GitHub Pages deploy.
 Everything else described below — additional modules, release automation,
@@ -49,11 +51,13 @@ graph TB
     Registry --> ModDiag["diagnostics module"]
     Registry --> ModDevices["device_info module"]
     Registry --> ModConn["connection module"]
+    Registry --> ModUser["user module"]
     Registry -.-> ModExt["3rd-party module<br/>(separate PyPI package)"]
 
     ModDiag --> Backend["AdbBackend<br/>(Protocol)"]
     ModDevices --> Backend
     ModConn --> Backend
+    ModUser --> Backend
     ModExt -.-> Backend
 
     Backend --> Sub["SubprocessBackend<br/>(production)"]
@@ -364,7 +368,8 @@ adb-mcp-server/
 │       └── modules/
 │           ├── diagnostics/  # service.py, tools.py, manifest.py
 │           ├── device_info/  # service.py, tools.py, manifest.py
-│           └── connection/   # service.py, tools.py, manifest.py
+│           ├── connection/   # service.py, tools.py, manifest.py
+│           └── user/         # service.py, tools.py, manifest.py
 └── tests/
     ├── meta/                 # Layer 0 — registry contract (typing + docstrings)
     ├── unit/                 # Layer 1, per module

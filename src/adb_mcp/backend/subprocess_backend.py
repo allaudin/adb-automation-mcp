@@ -1,11 +1,10 @@
 """The real AdbBackend implementation: executes adb as a subprocess.
 
-`list_devices`, `kill_server`, `start_server`, `connect`, and `disconnect` are
-exercised by modules built so far (diagnostics, device_info, connection); `shell`,
+`list_devices`, `kill_server`, `start_server`, `connect`, `disconnect`, and `shell`
+are exercised by modules built so far (diagnostics, device_info, connection, user);
 `install`, `uninstall`, `push`, and `pull` are implemented to the same standard but
 not yet used by any module. None of these have automated contract-test coverage
-against the real binary yet — verified manually against a real device for
-kill_server/start_server and for connect/disconnect instead.
+against the real binary yet — verified manually against a real device instead.
 """
 
 from __future__ import annotations

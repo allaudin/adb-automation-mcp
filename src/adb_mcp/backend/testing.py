@@ -25,6 +25,7 @@ class FakeBackend:
         start_server_result: CommandResult | None = None,
         connect_result: CommandResult | None = None,
         disconnect_result: CommandResult | None = None,
+        shell_result: CommandResult | None = None,
     ) -> None:
         self._devices = devices or []
         self._unavailable = unavailable
@@ -44,6 +45,11 @@ class FakeBackend:
         # below. A fixed override here is for simulating a specific failure.
         self._connect_result = connect_result
         self._disconnect_result = disconnect_result
+        # Real `adb shell am get-current-user` output for the common case (a
+        # single-user device, primary/owner user), captured from an actual run.
+        self._shell_result = shell_result or CommandResult(
+            stdout="0\n", stderr="", exit_code=0, duration_ms=45.0
+        )
 
     def _raise_if_unavailable(self) -> None:
         if self._unavailable:
@@ -58,7 +64,8 @@ class FakeBackend:
         return list(self._devices)
 
     async def shell(self, serial: str, command: str) -> CommandResult:
-        raise NotImplementedError("FakeBackend.shell: no module needs this yet")
+        self._raise_if_unavailable()
+        return self._shell_result
 
     async def install(self, serial: str, apk_path: str, flags: list[str]) -> CommandResult:
         raise NotImplementedError("FakeBackend.install: no module needs this yet")

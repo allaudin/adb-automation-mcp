@@ -24,6 +24,7 @@ nav:
       - diagnostics: reference/diagnostics.md
       - device_info: reference/device_info.md
       - connection: reference/connection.md
+      - user: reference/user.md
   - Integrations:
       - Claude Code: integrations/claude-code.md
 

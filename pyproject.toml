@@ -42,7 +42,7 @@ Documentation = "https://allaudin.github.io/adb-mcp-server/"
 Issues = "https://github.com/allaudin/adb-mcp-server/issues"
 
 [project.scripts]
-adb-mcp-server = "adb_mcp.server:main"
+android-adb-mcp = "adb_mcp.server:main"
 
 [project.entry-points."adb_mcp.modules"]
 diagnostics = "adb_mcp.modules.diagnostics.manifest:MODULE"

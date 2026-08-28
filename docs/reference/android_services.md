@@ -6,4 +6,4 @@ project's own "services" concept (the per-module domain service instances the
 registry builds). Foreground-service starts and stopping/querying a service's
 status aren't implemented yet.
 
-::: adb_mcp.modules.android_services.tools
+::: adb_automation_mcp.modules.android_services.tools

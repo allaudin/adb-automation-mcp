@@ -6,9 +6,9 @@ from __future__ import annotations
 
 import pytest
 
-from adb_mcp.backend.protocol import CommandResult
-from adb_mcp.backend.testing import FakeBackend
-from adb_mcp.errors import (
+from adb_automation_mcp.backend.protocol import CommandResult
+from adb_automation_mcp.backend.testing import FakeBackend
+from adb_automation_mcp.errors import (
     BackendError,
     DeviceNotFoundError,
     NonRuntimePermissionError,
@@ -17,7 +17,7 @@ from adb_mcp.errors import (
     PermissionNotDeclaredError,
     PermissionPolicyRestrictedError,
 )
-from adb_mcp.modules.permissions.service import PermissionsService
+from adb_automation_mcp.modules.permissions.service import PermissionsService
 
 
 @pytest.mark.asyncio

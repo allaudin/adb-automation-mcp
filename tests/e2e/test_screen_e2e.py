@@ -14,11 +14,11 @@ from typing import Any
 import pytest
 from fastmcp import Client, FastMCP
 
-from adb_mcp.backend.protocol import CommandResult
-from adb_mcp.backend.testing import FakeBackend
-from adb_mcp.modules.screen.service import ScreenService
-from adb_mcp.policy import PolicyConfig, PolicyEngine
-from adb_mcp.registry import Registry, discover_modules
+from adb_automation_mcp.backend.protocol import CommandResult
+from adb_automation_mcp.backend.testing import FakeBackend
+from adb_automation_mcp.modules.screen.service import ScreenService
+from adb_automation_mcp.policy import PolicyConfig, PolicyEngine
+from adb_automation_mcp.registry import Registry, discover_modules
 
 
 def _build_test_server_with_local_root(backend: FakeBackend, local_root: Path | None) -> FastMCP:
@@ -26,7 +26,7 @@ def _build_test_server_with_local_root(backend: FakeBackend, local_root: Path | 
     # _build_test_server helper in test_protocol_e2e.py doesn't parameterize
     # (no other module needed it before files/screen), so this builds a
     # server the same way but constructs the screen service directly with
-    # local_root instead of reading ADB_MCP_LOCAL_ROOT from the environment.
+    # local_root instead of reading ADB_AUTOMATION_LOCAL_ROOT from the environment.
     manifests = discover_modules()
     registry = Registry(policy=PolicyEngine(PolicyConfig()))
 
@@ -95,7 +95,7 @@ async def test_take_screenshot_tool_pull_failure_returns_remote_file_not_found_e
     backend = FakeBackend(
         pull_result=CommandResult(
             stdout="",
-            stderr="adb: error: remote object '/data/local/tmp/adb_mcp_screenshot_x.png' does not exist\n",
+            stderr="adb: error: remote object '/data/local/tmp/adb_automation_mcp_screenshot_x.png' does not exist\n",
             exit_code=1,
             duration_ms=15.0,
         )
@@ -134,5 +134,5 @@ async def test_take_screenshot_tool_cleanup_runs_regardless_of_pull_outcome(tmp_
         )
 
     assert result.data.status == "error"
-    rm_commands = [c for c in shell_commands if c.startswith("rm -f /data/local/tmp/adb_mcp_screenshot_")]
+    rm_commands = [c for c in shell_commands if c.startswith("rm -f /data/local/tmp/adb_automation_mcp_screenshot_")]
     assert len(rm_commands) == 1

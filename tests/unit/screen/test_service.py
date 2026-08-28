@@ -9,15 +9,15 @@ from pathlib import Path
 
 import pytest
 
-from adb_mcp.backend.protocol import CommandResult
-from adb_mcp.backend.testing import FakeBackend
-from adb_mcp.errors import (
+from adb_automation_mcp.backend.protocol import CommandResult
+from adb_automation_mcp.backend.testing import FakeBackend
+from adb_automation_mcp.errors import (
     BackendError,
     DeviceNotFoundError,
     PolicyViolationError,
     RemoteFileNotFoundError,
 )
-from adb_mcp.modules.screen.service import ScreenService
+from adb_automation_mcp.modules.screen.service import ScreenService
 
 _MINIMAL_PNG = (
     b"\x89PNG\r\n\x1a\n"
@@ -102,7 +102,7 @@ async def test_take_screenshot__sends_screencap_and_pull_with_matching_temp_path
     assert len(pull_calls) == 1
     remote_tmp_path = screencap_calls[0][1].removeprefix("screencap -p ")
     assert pull_calls[0][1] == remote_tmp_path
-    assert remote_tmp_path.startswith("/data/local/tmp/adb_mcp_screenshot_")
+    assert remote_tmp_path.startswith("/data/local/tmp/adb_automation_mcp_screenshot_")
     assert pull_calls[0][2] == str(tmp_path / "screen.png")
 
 
@@ -180,7 +180,7 @@ async def test_take_screenshot__pull_failure_raises_remote_file_not_found(tmp_pa
     backend = FakeBackend(
         pull_result=CommandResult(
             stdout="",
-            stderr="adb: error: remote object '/data/local/tmp/adb_mcp_screenshot_x.png' does not exist\n",
+            stderr="adb: error: remote object '/data/local/tmp/adb_automation_mcp_screenshot_x.png' does not exist\n",
             exit_code=1,
             duration_ms=15.0,
         )
@@ -204,7 +204,7 @@ async def test_take_screenshot__cleanup_runs_after_successful_capture(tmp_path: 
 
     await service.take_screenshot("emulator-5554", "screen.png")
 
-    rm_commands = [c for c in shell_commands if c.startswith("rm -f /data/local/tmp/adb_mcp_screenshot_")]
+    rm_commands = [c for c in shell_commands if c.startswith("rm -f /data/local/tmp/adb_automation_mcp_screenshot_")]
     assert len(rm_commands) == 1
 
 
@@ -227,7 +227,7 @@ async def test_take_screenshot__cleanup_runs_even_when_pull_fails(tmp_path: Path
     with pytest.raises(RemoteFileNotFoundError):
         await service.take_screenshot("emulator-5554", "screen.png")
 
-    rm_commands = [c for c in shell_commands if c.startswith("rm -f /data/local/tmp/adb_mcp_screenshot_")]
+    rm_commands = [c for c in shell_commands if c.startswith("rm -f /data/local/tmp/adb_automation_mcp_screenshot_")]
     assert len(rm_commands) == 1
 
 
@@ -248,7 +248,7 @@ async def test_take_screenshot__cleanup_runs_even_when_screencap_fails(tmp_path:
     with pytest.raises(BackendError):
         await service.take_screenshot("emulator-5554", "screen.png")
 
-    rm_commands = [c for c in shell_commands if c.startswith("rm -f /data/local/tmp/adb_mcp_screenshot_")]
+    rm_commands = [c for c in shell_commands if c.startswith("rm -f /data/local/tmp/adb_automation_mcp_screenshot_")]
     assert len(rm_commands) == 1
 
 

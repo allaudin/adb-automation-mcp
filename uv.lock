@@ -12,43 +12,8 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "aiofile"
-version = "3.9.0"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version < '3.11' and sys_platform == 'win32'",
-    "python_full_version < '3.11' and sys_platform != 'win32'",
-]
-dependencies = [
-    { name = "caio", version = "0.9.25", source = { registry = "https://pypi.org/simple" } },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/67/e2/d7cb819de8df6b5c1968a2756c3cb4122d4fa2b8fc768b53b7c9e5edb646/aiofile-3.9.0.tar.gz", hash = "sha256:e5ad718bb148b265b6df1b3752c4d1d83024b93da9bd599df74b9d9ffcf7919b", size = 17943, upload-time = "2024-10-08T10:39:35.846Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/50/25/da1f0b4dd970e52bf5a36c204c107e11a0c6d3ed195eba0bfbc664c312b2/aiofile-3.9.0-py3-none-any.whl", hash = "sha256:ce2f6c1571538cbdfa0143b04e16b208ecb0e9cb4148e528af8a640ed51cc8aa", size = 19539, upload-time = "2024-10-08T10:39:32.955Z" },
-]
-
-[[package]]
-name = "aiofile"
-version = "3.12.3"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.15'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and sys_platform != 'win32'",
-    "python_full_version >= '3.11' and python_full_version < '3.14' and sys_platform == 'win32'",
-    "python_full_version >= '3.11' and python_full_version < '3.14' and sys_platform != 'win32'",
-]
-dependencies = [
-    { name = "caio", version = "0.12.2", source = { registry = "https://pypi.org/simple" } },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/14/31/edb06aabd8f8f0b56d659f30800795f40b93cba96be946ce179f6931e3a5/aiofile-3.12.3.tar.gz", hash = "sha256:caa6aa746b5e47e2165f7abd741b6415e49cf4d44fddc0f61844612cc3924d41", size = 21600, upload-time = "2026-08-04T22:59:27.171Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/4e/79/6e45e778c4c3cab39e0937b007b720c15f76c50c6453d153282d0fcc3588/aiofile-3.12.3-py3-none-any.whl", hash = "sha256:5c1bcc9e929c50834608e8cc1a4cc1d7503eb60c15a535b779fd39e2f372c017", size = 22122, upload-time = "2026-08-04T22:59:25.838Z" },
-]
-
-[[package]]
-name = "android-adb-mcp"
-version = "0.3.0"
+name = "adb-automation-mcp"
+version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },
@@ -85,6 +50,41 @@ dev = [
 docs = [
     { name = "mkdocs-material", specifier = ">=9.5" },
     { name = "mkdocstrings", extras = ["python"], specifier = ">=0.26" },
+]
+
+[[package]]
+name = "aiofile"
+version = "3.9.0"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version < '3.11' and sys_platform == 'win32'",
+    "python_full_version < '3.11' and sys_platform != 'win32'",
+]
+dependencies = [
+    { name = "caio", version = "0.9.25", source = { registry = "https://pypi.org/simple" } },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/67/e2/d7cb819de8df6b5c1968a2756c3cb4122d4fa2b8fc768b53b7c9e5edb646/aiofile-3.9.0.tar.gz", hash = "sha256:e5ad718bb148b265b6df1b3752c4d1d83024b93da9bd599df74b9d9ffcf7919b", size = 17943, upload-time = "2024-10-08T10:39:35.846Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/50/25/da1f0b4dd970e52bf5a36c204c107e11a0c6d3ed195eba0bfbc664c312b2/aiofile-3.9.0-py3-none-any.whl", hash = "sha256:ce2f6c1571538cbdfa0143b04e16b208ecb0e9cb4148e528af8a640ed51cc8aa", size = 19539, upload-time = "2024-10-08T10:39:32.955Z" },
+]
+
+[[package]]
+name = "aiofile"
+version = "3.12.3"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.15'",
+    "python_full_version == '3.14.*' and sys_platform == 'win32'",
+    "python_full_version == '3.14.*' and sys_platform != 'win32'",
+    "python_full_version >= '3.11' and python_full_version < '3.14' and sys_platform == 'win32'",
+    "python_full_version >= '3.11' and python_full_version < '3.14' and sys_platform != 'win32'",
+]
+dependencies = [
+    { name = "caio", version = "0.12.2", source = { registry = "https://pypi.org/simple" } },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/14/31/edb06aabd8f8f0b56d659f30800795f40b93cba96be946ce179f6931e3a5/aiofile-3.12.3.tar.gz", hash = "sha256:caa6aa746b5e47e2165f7abd741b6415e49cf4d44fddc0f61844612cc3924d41", size = 21600, upload-time = "2026-08-04T22:59:27.171Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4e/79/6e45e778c4c3cab39e0937b007b720c15f76c50c6453d153282d0fcc3588/aiofile-3.12.3-py3-none-any.whl", hash = "sha256:5c1bcc9e929c50834608e8cc1a4cc1d7503eb60c15a535b779fd39e2f372c017", size = 22122, upload-time = "2026-08-04T22:59:25.838Z" },
 ]
 
 [[package]]

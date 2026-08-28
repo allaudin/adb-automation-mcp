@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-This is the decision log for `adb-mcp-server`: what was decided, why, and what was
+This is the decision log for `adb-automation-mcp`: what was decided, why, and what was
 rejected instead. For a description of the *current* system — components, boot
 sequence, how things fit together — see `ARCHITECTURE.md`. This file is a historical
 record; entries are not rewritten as the system evolves; a superseded decision gets a
@@ -74,14 +74,14 @@ vendor-specific modules should eventually be able to ship as independent PyPI
 packages without forking core.
 
 **Decision:** Command modules are discovered via Python `entry_points` (group
-`adb_mcp.modules`), not a hardcoded import list. Each module exposes a static
+`adb_automation_mcp.modules`), not a hardcoded import list. Each module exposes a static
 `ModuleManifest` (name, `service_factory`, `tools`, `resources`) — data, not a
 side-effecting registration call. Built-in modules use the exact same mechanism a
 third-party plugin would.
 
 **Consequences:** No "core modules are special" second code path to maintain.
 Trade-off accepted: slightly more indirection at startup — you check
-`pyproject.toml`'s `[project.entry-points."adb_mcp.modules"]` table rather than
+`pyproject.toml`'s `[project.entry-points."adb_automation_mcp.modules"]` table rather than
 grepping for where a module is registered.
 
 ---
@@ -162,7 +162,7 @@ tests never branch on backend type and exercise the real calling convention.
 **Decision:** Conventional Commits + `python-semantic-release` in GitHub Actions,
 computing the next SemVer version from commit history automatically. PyPI trusted
 publishing (OIDC from GitHub Actions) — no long-lived API tokens stored as secrets.
-Ships a console-script entry point so end users run it as `uvx adb-mcp-server`.
+Ships a console-script entry point so end users run it as `uvx adb-automation-mcp`.
 
 **Consequences:** See `ARCHITECTURE.md`'s CI/CD section for the actual pipeline shape
 and what's currently implemented versus still planned.

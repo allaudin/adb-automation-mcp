@@ -6,9 +6,9 @@ from __future__ import annotations
 
 import pytest
 
-from adb_mcp.backend.protocol import CommandResult
-from adb_mcp.backend.testing import FakeBackend
-from adb_mcp.errors import (
+from adb_automation_mcp.backend.protocol import CommandResult
+from adb_automation_mcp.backend.testing import FakeBackend
+from adb_automation_mcp.errors import (
     AdbUnavailableError,
     BackendError,
     DeviceNotFoundError,
@@ -17,7 +17,7 @@ from adb_mcp.errors import (
     UiAutomatorFailedError,
     UiHierarchyUnavailableError,
 )
-from adb_mcp.modules.ui.service import UiService
+from adb_automation_mcp.modules.ui.service import UiService
 
 
 @pytest.mark.asyncio
@@ -46,9 +46,9 @@ async def test_dump_ui_hierarchy__cleans_up_temp_file_on_success() -> None:
 
     await service.dump_ui_hierarchy("emulator-5554")
 
-    assert commands[0].startswith("uiautomator dump /data/local/tmp/adb_mcp_ui_dump_")
-    assert commands[1].startswith("cat /data/local/tmp/adb_mcp_ui_dump_")
-    assert commands[2].startswith("rm -f /data/local/tmp/adb_mcp_ui_dump_")
+    assert commands[0].startswith("uiautomator dump /data/local/tmp/adb_automation_mcp_ui_dump_")
+    assert commands[1].startswith("cat /data/local/tmp/adb_automation_mcp_ui_dump_")
+    assert commands[2].startswith("rm -f /data/local/tmp/adb_automation_mcp_ui_dump_")
 
 
 @pytest.mark.asyncio
@@ -125,7 +125,7 @@ async def test_dump_ui_hierarchy__temp_file_missing_raises_remote_file_not_found
     backend = FakeBackend(
         ui_hierarchy_cat_result=CommandResult(
             stdout="",
-            stderr="cat: /data/local/tmp/adb_mcp_ui_dump_xyz.xml: No such file or directory\n",
+            stderr="cat: /data/local/tmp/adb_automation_mcp_ui_dump_xyz.xml: No such file or directory\n",
             exit_code=1,
             duration_ms=5.0,
         )

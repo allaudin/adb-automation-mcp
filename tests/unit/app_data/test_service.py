@@ -6,9 +6,9 @@ from __future__ import annotations
 
 import pytest
 
-from adb_mcp.backend.protocol import CommandResult
-from adb_mcp.backend.testing import FakeBackend
-from adb_mcp.errors import (
+from adb_automation_mcp.backend.protocol import CommandResult
+from adb_automation_mcp.backend.testing import FakeBackend
+from adb_automation_mcp.errors import (
     AndroidRejectionError,
     BackendError,
     CacheOnlyUnsupportedError,
@@ -16,7 +16,7 @@ from adb_mcp.errors import (
     PackageNotFoundError,
     PermissionDeniedError,
 )
-from adb_mcp.modules.app_data.service import AppDataService
+from adb_automation_mcp.modules.app_data.service import AppDataService
 
 
 @pytest.mark.asyncio

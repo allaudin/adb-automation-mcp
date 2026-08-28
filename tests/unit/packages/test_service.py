@@ -6,9 +6,9 @@ from __future__ import annotations
 
 import pytest
 
-from adb_mcp.backend.protocol import CommandResult
-from adb_mcp.backend.testing import FakeBackend
-from adb_mcp.errors import (
+from adb_automation_mcp.backend.protocol import CommandResult
+from adb_automation_mcp.backend.testing import FakeBackend
+from adb_automation_mcp.errors import (
     AdbUnavailableError,
     AndroidRejectionError,
     BackendError,
@@ -17,7 +17,7 @@ from adb_mcp.errors import (
     PackageNotFoundError,
     UserNotFoundError,
 )
-from adb_mcp.modules.packages.service import PackageList, PackagesService
+from adb_automation_mcp.modules.packages.service import PackageList, PackagesService
 
 
 def test_service_constructs_with_backend() -> None:

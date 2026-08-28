@@ -6,16 +6,16 @@ from __future__ import annotations
 
 import pytest
 
-from adb_mcp.backend.protocol import CommandResult
-from adb_mcp.backend.testing import FakeBackend
-from adb_mcp.errors import (
+from adb_automation_mcp.backend.protocol import CommandResult
+from adb_automation_mcp.backend.testing import FakeBackend
+from adb_automation_mcp.errors import (
     BackendError,
     BackgroundServiceRestrictedError,
     ComponentNotFoundError,
     DeviceNotFoundError,
     PermissionDeniedError,
 )
-from adb_mcp.modules.android_services.service import AndroidServicesService
+from adb_automation_mcp.modules.android_services.service import AndroidServicesService
 
 
 @pytest.mark.asyncio

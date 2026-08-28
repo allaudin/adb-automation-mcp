@@ -6,15 +6,15 @@ from __future__ import annotations
 
 import pytest
 
-from adb_mcp.backend.protocol import CommandResult
-from adb_mcp.backend.testing import FakeBackend
-from adb_mcp.errors import (
+from adb_automation_mcp.backend.protocol import CommandResult
+from adb_automation_mcp.backend.testing import FakeBackend
+from adb_automation_mcp.errors import (
     BackendError,
     DeviceNotFoundError,
     InvalidArgumentError,
     PermissionDeniedError,
 )
-from adb_mcp.modules.input.service import InputService
+from adb_automation_mcp.modules.input.service import InputService
 
 
 @pytest.mark.asyncio

@@ -12,7 +12,7 @@ from typing import Any, get_type_hints
 import pytest
 from docstring_parser import parse
 
-from adb_mcp.registry import discover_modules
+from adb_automation_mcp.registry import discover_modules
 
 
 def _collect_all_tools() -> list[tuple[str, Any]]:

@@ -10,4 +10,4 @@ APK/APK-bundle/APEX installation, staged installs/install sessions,
 install-location management, and package enable/disable/suspend aren't
 implemented yet.
 
-::: adb_mcp.modules.packages.tools
+::: adb_automation_mcp.modules.packages.tools

@@ -1,6 +1,6 @@
 [project]
-name = "android-adb-mcp"
-version = "0.3.0"
+name = "adb-automation-mcp"
+version = "1.0.0"
 description = "MCP server exposing Android Debug Bridge (ADB) capabilities as tools and resources."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -36,37 +36,37 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/allaudin/adb-mcp-server"
-Repository = "https://github.com/allaudin/adb-mcp-server"
-Documentation = "https://allaudin.github.io/adb-mcp-server/"
-Issues = "https://github.com/allaudin/adb-mcp-server/issues"
+Homepage = "https://github.com/allaudin/adb-automation-mcp"
+Repository = "https://github.com/allaudin/adb-automation-mcp"
+Documentation = "https://allaudin.github.io/adb-automation-mcp/"
+Issues = "https://github.com/allaudin/adb-automation-mcp/issues"
 
 [project.scripts]
-android-adb-mcp = "adb_mcp.server:main"
+adb-automation-mcp = "adb_automation_mcp.server:main"
 
-[project.entry-points."adb_mcp.modules"]
-diagnostics = "adb_mcp.modules.diagnostics.manifest:MODULE"
-device_info = "adb_mcp.modules.device_info.manifest:MODULE"
-connection = "adb_mcp.modules.connection.manifest:MODULE"
-user = "adb_mcp.modules.user.manifest:MODULE"
-logger = "adb_mcp.modules.logger.manifest:MODULE"
-system_properties = "adb_mcp.modules.system_properties.manifest:MODULE"
-packages = "adb_mcp.modules.packages.manifest:MODULE"
-activities = "adb_mcp.modules.activities.manifest:MODULE"
-broadcasts = "adb_mcp.modules.broadcasts.manifest:MODULE"
-android_services = "adb_mcp.modules.android_services.manifest:MODULE"
-processes = "adb_mcp.modules.processes.manifest:MODULE"
-files = "adb_mcp.modules.files.manifest:MODULE"
-app_data = "adb_mcp.modules.app_data.manifest:MODULE"
-screen = "adb_mcp.modules.screen.manifest:MODULE"
-permissions = "adb_mcp.modules.permissions.manifest:MODULE"
-settings = "adb_mcp.modules.settings.manifest:MODULE"
-displays = "adb_mcp.modules.displays.manifest:MODULE"
-power = "adb_mcp.modules.power.manifest:MODULE"
-network = "adb_mcp.modules.network.manifest:MODULE"
-date_time = "adb_mcp.modules.date_time.manifest:MODULE"
-input = "adb_mcp.modules.input.manifest:MODULE"
-ui = "adb_mcp.modules.ui.manifest:MODULE"
+[project.entry-points."adb_automation_mcp.modules"]
+diagnostics = "adb_automation_mcp.modules.diagnostics.manifest:MODULE"
+device_info = "adb_automation_mcp.modules.device_info.manifest:MODULE"
+connection = "adb_automation_mcp.modules.connection.manifest:MODULE"
+user = "adb_automation_mcp.modules.user.manifest:MODULE"
+logger = "adb_automation_mcp.modules.logger.manifest:MODULE"
+system_properties = "adb_automation_mcp.modules.system_properties.manifest:MODULE"
+packages = "adb_automation_mcp.modules.packages.manifest:MODULE"
+activities = "adb_automation_mcp.modules.activities.manifest:MODULE"
+broadcasts = "adb_automation_mcp.modules.broadcasts.manifest:MODULE"
+android_services = "adb_automation_mcp.modules.android_services.manifest:MODULE"
+processes = "adb_automation_mcp.modules.processes.manifest:MODULE"
+files = "adb_automation_mcp.modules.files.manifest:MODULE"
+app_data = "adb_automation_mcp.modules.app_data.manifest:MODULE"
+screen = "adb_automation_mcp.modules.screen.manifest:MODULE"
+permissions = "adb_automation_mcp.modules.permissions.manifest:MODULE"
+settings = "adb_automation_mcp.modules.settings.manifest:MODULE"
+displays = "adb_automation_mcp.modules.displays.manifest:MODULE"
+power = "adb_automation_mcp.modules.power.manifest:MODULE"
+network = "adb_automation_mcp.modules.network.manifest:MODULE"
+date_time = "adb_automation_mcp.modules.date_time.manifest:MODULE"
+input = "adb_automation_mcp.modules.input.manifest:MODULE"
+ui = "adb_automation_mcp.modules.ui.manifest:MODULE"
 
 [dependency-groups]
 dev = [
@@ -86,7 +86,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/adb_mcp"]
+packages = ["src/adb_automation_mcp"]
 
 [tool.mypy]
 strict = true

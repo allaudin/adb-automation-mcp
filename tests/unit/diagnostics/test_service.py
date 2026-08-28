@@ -6,9 +6,9 @@ from __future__ import annotations
 
 import pytest
 
-from adb_mcp.backend.protocol import DeviceInfo
-from adb_mcp.backend.testing import FakeBackend
-from adb_mcp.modules.diagnostics.service import DiagnosticsService
+from adb_automation_mcp.backend.protocol import DeviceInfo
+from adb_automation_mcp.backend.testing import FakeBackend
+from adb_automation_mcp.modules.diagnostics.service import DiagnosticsService
 
 
 @pytest.mark.asyncio
@@ -47,14 +47,14 @@ async def test_check_adb_available__adb_missing_reports_available_false_not_an_e
 
 
 def test_summary_mentions_device_count_when_available() -> None:
-    from adb_mcp.modules.diagnostics.service import AdbAvailability
+    from adb_automation_mcp.modules.diagnostics.service import AdbAvailability
 
     assert "2 devices" in AdbAvailability(available=True, device_count=2).summary()
     assert "1 device " in AdbAvailability(available=True, device_count=1).summary() + " "
 
 
 def test_summary_explains_reason_when_unavailable() -> None:
-    from adb_mcp.modules.diagnostics.service import AdbAvailability
+    from adb_automation_mcp.modules.diagnostics.service import AdbAvailability
 
     summary = AdbAvailability(available=False, reason="adb not on PATH").summary()
     assert "not available" in summary

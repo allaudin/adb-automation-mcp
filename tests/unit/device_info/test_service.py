@@ -6,10 +6,10 @@ from __future__ import annotations
 
 import pytest
 
-from adb_mcp.backend.protocol import DeviceInfo
-from adb_mcp.backend.testing import FakeBackend
-from adb_mcp.errors import AdbUnavailableError
-from adb_mcp.modules.device_info.service import DeviceInfoService
+from adb_automation_mcp.backend.protocol import DeviceInfo
+from adb_automation_mcp.backend.testing import FakeBackend
+from adb_automation_mcp.errors import AdbUnavailableError
+from adb_automation_mcp.modules.device_info.service import DeviceInfoService
 
 
 @pytest.mark.asyncio

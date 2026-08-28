@@ -14,11 +14,11 @@ from typing import Any
 import pytest
 from fastmcp import Client, FastMCP
 
-from adb_mcp.backend.protocol import CommandResult
-from adb_mcp.backend.testing import FakeBackend
-from adb_mcp.modules.files.service import FilesService
-from adb_mcp.policy import PolicyConfig, PolicyEngine
-from adb_mcp.registry import Registry, discover_modules
+from adb_automation_mcp.backend.protocol import CommandResult
+from adb_automation_mcp.backend.testing import FakeBackend
+from adb_automation_mcp.modules.files.service import FilesService
+from adb_automation_mcp.policy import PolicyConfig, PolicyEngine
+from adb_automation_mcp.registry import Registry, discover_modules
 
 
 def _build_test_server_with_local_root(backend: FakeBackend, local_root: Path | None) -> FastMCP:
@@ -26,7 +26,7 @@ def _build_test_server_with_local_root(backend: FakeBackend, local_root: Path | 
     # _build_test_server helper in test_protocol_e2e.py doesn't parameterize
     # (no other module needed it), so this builds a server the same way but
     # constructs the files service directly with local_root instead of
-    # reading ADB_MCP_LOCAL_ROOT from the environment.
+    # reading ADB_AUTOMATION_LOCAL_ROOT from the environment.
     manifests = discover_modules()
     registry = Registry(policy=PolicyEngine(PolicyConfig()))
 

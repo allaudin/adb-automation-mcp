@@ -27,7 +27,7 @@ An MCP server that exposes Android Debug Bridge (ADB) capabilities to MCP client
   a given server instance, not who is calling it.
 
 **Current implementation status (2026-08-26):** six modules exist under
-`src/adb_mcp/modules/`: `diagnostics` (`check_adb_available`), `device_info`
+`src/adb_automation_mcp/modules/`: `diagnostics` (`check_adb_available`), `device_info`
 (`list_connected_devices`), `connection` (`restart_adb_server`,
 `connect_device`, `disconnect_device`, `restart_adbd_as_root` — the last
 restarts the *device-side* `adbd` daemon as root, `adb -s <serial> root`,
@@ -53,7 +53,7 @@ a plain property write; `get_property_metadata`'s SELinux-context/declared-type
 fields are best-effort and degrade to `None` on devices/Android versions that
 don't support the underlying `getprop -Z` capability). `stop_log_session` is
 the first tool that writes to the host filesystem; it's gated by a call-time
-`local_root` check (`ADB_MCP_LOCAL_ROOT`) — no default, refuses to run until
+`local_root` check (`ADB_AUTOMATION_LOCAL_ROOT`) — no default, refuses to run until
 an operator sets it.
 It passes `mypy --strict`, `ruff`,
 `pytest`, and has been verified
@@ -141,10 +141,10 @@ sequenceDiagram
     participant BE as Backend
     participant MCP as FastMCP instance
 
-    Py->>EP: discover_modules() — entry_points(group="adb_mcp.modules")
+    Py->>EP: discover_modules() — entry_points(group="adb_automation_mcp.modules")
     EP-->>Py: [ModuleManifest, ...]
     Py->>Reg: Registry(policy=PolicyEngine(config))
-    Py->>MCP: FastMCP("adb-mcp-server", lifespan=app_lifespan)
+    Py->>MCP: FastMCP("adb-automation-mcp", lifespan=app_lifespan)
     Py->>Reg: register_tools(mcp, manifests)
     loop for each manifest, each tool fn
         Reg->>Reg: policy.is_allowed(module, tool, category)?
@@ -166,7 +166,7 @@ sequenceDiagram
 Two phases matter here, and they happen in a specific order for a reason:
 
 **Phase 1 — import time, static, no backend involved.** `discover_modules()` walks
-Python `entry_points` for group `adb_mcp.modules` and loads every registered
+Python `entry_points` for group `adb_automation_mcp.modules` and loads every registered
 `ModuleManifest`. A `PolicyEngine` is built from config/env. A `Registry` is
 constructed with that policy, and `register_tools` runs immediately — every tool
 function gets a policy check and, if allowed, gets wrapped and handed to the
@@ -175,7 +175,7 @@ function gets a policy check and, if allowed, gets wrapped and handed to the
 **Phase 2 — process start, per-run, backend-dependent.** `mcp.run()` starts the stdio
 transport loop. Before the first request is served, `app_lifespan` runs once: it picks
 a backend implementation (`SubprocessBackend` by default, `FakeBackend` if
-`ADB_MCP_BACKEND=fake`), then asks the registry to build one service instance per
+`ADB_AUTOMATION_BACKEND=fake`), then asks the registry to build one service instance per
 module, passing every service the *same* shared backend instance. That
 `{"backend": ..., "services": {...}}` dict is what every tool call accesses for the
 life of the process, via `Context.lifespan_context`.
@@ -390,7 +390,7 @@ genuinely matter more than universal client support.
 ## 8. Repository Layout
 
 ```
-adb-mcp-server/
+adb-automation-mcp/
 ├── pyproject.toml
 ├── uv.lock
 ├── mkdocs.yml                # docs site config — nav, theme, mkdocstrings
@@ -405,7 +405,7 @@ adb-mcp-server/
 │   └── workflows/
 │       └── ci.yml            # lint, type-check, tests, docs build/deploy — on every push/PR
 ├── src/
-│   └── adb_mcp/
+│   └── adb_automation_mcp/
 │       ├── __main__.py
 │       ├── server.py         # builds FastMCP app, lifespan, runs registry
 │       ├── registry.py       # entry_points discovery, policy-filtered registration, envelope wrapping
@@ -430,7 +430,7 @@ adb-mcp-server/
 ```
 
 Single distribution (not a `uv` workspace of many packages) — built-in modules are
-subpackages of `adb_mcp`, registered through the same `entry_points` mechanism a
+subpackages of `adb_automation_mcp`, registered through the same `entry_points` mechanism a
 third-party plugin would use.
 
 ## 9. Testing Layers

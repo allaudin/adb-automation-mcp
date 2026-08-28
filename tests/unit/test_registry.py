@@ -12,9 +12,9 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ResourceError
 from pydantic import BaseModel
 
-from adb_mcp.errors import AdbUnavailableError
-from adb_mcp.policy import PolicyConfig, PolicyEngine
-from adb_mcp.registry import ModuleManifest, Registry, wrap_resource, wrap_with_envelope
+from adb_automation_mcp.errors import AdbUnavailableError
+from adb_automation_mcp.policy import PolicyConfig, PolicyEngine
+from adb_automation_mcp.registry import ModuleManifest, Registry, wrap_resource, wrap_with_envelope
 
 
 class _Data(BaseModel):

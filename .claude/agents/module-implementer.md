@@ -1,6 +1,6 @@
 ---
 name: module-implementer
-description: Implements or extends one explicitly assigned adb_mcp domain module and its module-specific tests. Use for parallel work on independent modules such as users, logging, diagnostics, connection, or device_info. Do not use for shared architecture or cross-cutting infrastructure changes.
+description: Implements or extends one explicitly assigned adb_automation_mcp domain module and its module-specific tests. Use for parallel work on independent modules such as users, logging, diagnostics, connection, or device_info. Do not use for shared architecture or cross-cutting infrastructure changes.
 tools: Read, Write, Edit, Grep, Glob, Bash
 model: sonnet
 permissionMode: acceptEdits
@@ -19,18 +19,18 @@ You own module implementation, not project architecture.
 
 You may change only:
 
-- `src/adb_mcp/modules/<assigned-module>/**`
+- `src/adb_automation_mcp/modules/<assigned-module>/**`
 - module-specific unit tests for the assigned module
 - module-specific protocol/e2e tests when they can be added without changing shared fixtures or infrastructure
 
 Do not modify shared or cross-cutting project files, including:
 
-- `src/adb_mcp/backend/**`
-- `src/adb_mcp/registry.py`
-- `src/adb_mcp/server.py`
-- `src/adb_mcp/policy.py`
-- `src/adb_mcp/errors.py`
-- `src/adb_mcp/responses.py`
+- `src/adb_automation_mcp/backend/**`
+- `src/adb_automation_mcp/registry.py`
+- `src/adb_automation_mcp/server.py`
+- `src/adb_automation_mcp/policy.py`
+- `src/adb_automation_mcp/errors.py`
+- `src/adb_automation_mcp/responses.py`
 - shared test fixtures or test infrastructure
 - `pyproject.toml`, CI configuration, or repository-wide documentation
 

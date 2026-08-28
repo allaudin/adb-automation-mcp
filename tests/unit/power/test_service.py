@@ -6,10 +6,10 @@ from __future__ import annotations
 
 import pytest
 
-from adb_mcp.backend.protocol import CommandResult
-from adb_mcp.backend.testing import FakeBackend
-from adb_mcp.errors import BackendError, DeviceNotFoundError, PowerStateUnavailableError
-from adb_mcp.modules.power.service import PowerService
+from adb_automation_mcp.backend.protocol import CommandResult
+from adb_automation_mcp.backend.testing import FakeBackend
+from adb_automation_mcp.errors import BackendError, DeviceNotFoundError, PowerStateUnavailableError
+from adb_automation_mcp.modules.power.service import PowerService
 
 
 @pytest.mark.asyncio

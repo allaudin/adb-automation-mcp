@@ -5,18 +5,18 @@ client's configuration (Claude Code, GitHub Copilot in agent mode, etc.), you ca
 it the prompt below instead of following the setup steps by hand. It checks for `uv`
 and `adb`, resolves `adb`'s absolute path (important — most MCP clients don't launch
 the server with your shell's `PATH`), registers the server against the published
-`android-adb-mcp` package, and verifies it starts.
+`adb-automation-mcp` package, and verifies it starts.
 
 Paste this into your assistant:
 
 ```text
 Install and configure the ADB MCP Server from:
 
-https://github.com/allaudin/adb-mcp-server
+https://github.com/allaudin/adb-automation-mcp
 
 The published Python package is:
 
-`android-adb-mcp`
+`adb-automation-mcp`
 
 Please do the following:
 
@@ -30,23 +30,23 @@ Please do the following:
 
 Prefer running the published package directly with:
 
-`uvx android-adb-mcp`
+`uvx adb-automation-mcp`
 
 rather than cloning the repository.
 
 Configure the server name as:
 
-`adb-mcp-server`
+`adb-automation-mcp`
 
 Set:
 
-`ADB_MCP_ADB_PATH`
+`ADB_AUTOMATION_ADB_PATH`
 
 to the absolute path of the detected `adb` executable.
 
 Do not enable destructive tools unless I explicitly ask you to.
 
-If I want tools that write files to the host later, explain that `ADB_MCP_LOCAL_ROOT` must be configured and ask me which directory should be allowed.
+If I want tools that write files to the host later, explain that `ADB_AUTOMATION_LOCAL_ROOT` must be configured and ask me which directory should be allowed.
 
 5. After configuration, verify that the MCP server starts successfully and is visible to the current MCP client.
 

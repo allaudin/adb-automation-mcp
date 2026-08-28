@@ -10,8 +10,8 @@ import pytest
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
-from adb_mcp.backend.protocol import CommandResult
-from adb_mcp.backend.testing import FakeBackend
+from adb_automation_mcp.backend.protocol import CommandResult
+from adb_automation_mcp.backend.testing import FakeBackend
 from tests.e2e.test_protocol_e2e import _build_test_server
 
 

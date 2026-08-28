@@ -43,7 +43,7 @@ coverage.xml
 site/
 
 # --- Local runtime config (never commit real local_root/policy paths — ADR-010) ---
-adb-mcp.toml
+adb-automation-mcp.toml
 .env
 .env.*
 !.env.example

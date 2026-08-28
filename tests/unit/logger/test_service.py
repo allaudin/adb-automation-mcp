@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from adb_mcp.backend.protocol import CommandResult
-from adb_mcp.backend.testing import FakeBackend
-from adb_mcp.errors import (
+from adb_automation_mcp.backend.protocol import CommandResult
+from adb_automation_mcp.backend.testing import FakeBackend
+from adb_automation_mcp.errors import (
     AdbUnavailableError,
     BackendError,
     DeviceNotFoundError,
@@ -19,7 +19,7 @@ from adb_mcp.errors import (
     PackageNotRunningError,
     PolicyViolationError,
 )
-from adb_mcp.modules.logger.service import (
+from adb_automation_mcp.modules.logger.service import (
     ClearLogsResult,
     LogBufferSize,
     LogDump,

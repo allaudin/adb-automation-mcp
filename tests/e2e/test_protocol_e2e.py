@@ -22,10 +22,10 @@ from typing import Any
 import pytest
 from fastmcp import Client, FastMCP
 
-from adb_mcp.backend.protocol import DeviceInfo
-from adb_mcp.backend.testing import FakeBackend
-from adb_mcp.policy import PolicyConfig, PolicyEngine
-from adb_mcp.registry import Registry, discover_modules
+from adb_automation_mcp.backend.protocol import DeviceInfo
+from adb_automation_mcp.backend.testing import FakeBackend
+from adb_automation_mcp.policy import PolicyConfig, PolicyEngine
+from adb_automation_mcp.registry import Registry, discover_modules
 
 
 def _build_test_server(backend: FakeBackend, *, allow_destructive: bool = False) -> FastMCP:
@@ -295,7 +295,7 @@ async def test_start_log_session_tool_round_trips_over_mcp_protocol() -> None:
 async def test_start_then_stop_log_session_tool_round_trips_over_mcp_protocol(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("ADB_MCP_LOCAL_ROOT", str(tmp_path))
+    monkeypatch.setenv("ADB_AUTOMATION_LOCAL_ROOT", str(tmp_path))
     mcp = _build_test_server(FakeBackend())
 
     async with Client(mcp) as client:
@@ -350,7 +350,7 @@ async def test_start_log_session_tool_pid_and_package_together_returns_invalid_a
 async def test_stop_log_session_tool_without_local_root_returns_policy_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("ADB_MCP_LOCAL_ROOT", raising=False)
+    monkeypatch.delenv("ADB_AUTOMATION_LOCAL_ROOT", raising=False)
     mcp = _build_test_server(FakeBackend())
 
     async with Client(mcp) as client:

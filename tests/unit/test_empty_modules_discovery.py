@@ -15,9 +15,9 @@ from __future__ import annotations
 
 from fastmcp import FastMCP
 
-from adb_mcp.backend.testing import FakeBackend
-from adb_mcp.policy import PolicyConfig, PolicyEngine
-from adb_mcp.registry import Registry, discover_modules
+from adb_automation_mcp.backend.testing import FakeBackend
+from adb_automation_mcp.policy import PolicyConfig, PolicyEngine
+from adb_automation_mcp.registry import Registry, discover_modules
 
 _SKELETON_MODULES = {
     "displays",

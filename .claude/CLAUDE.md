@@ -11,7 +11,7 @@ non-trivial changes:
 - `../docs/ARCHITECTURE.md` — current-state description: component diagram, boot
   sequence, core concepts (Backend/Service/Tool/Registry/Policy/Envelope), module
   layering, repo layout, testing layers, CI/CD. **Read this first.**
-- `../docs/ADR.md` — decision log (17 ADRs). Explains *why* things are shaped this way,
+- `../docs/ADR.md` — decision log (18 ADRs). Explains *why* things are shaped this way,
   including several non-obvious findings (fastmcp docstring-parsing quirks,
   `docstring_parser` crashing on prose `Raises:` sections, `adb connect`'s exit code
   being useless, etc.) that are easy to accidentally re-break.
@@ -23,7 +23,7 @@ over any summary here.
 
 ```bash
 uv sync                        # install deps (dev group for testing)
-uv run adb-mcp-server           # run the server (stdio)
+uv run android-adb-mcp          # run the server (stdio)
 
 uv run pytest                  # meta (Layer 0) + unit (Layer 1) + e2e (Layer 3) tests
 uv run pytest tests/unit/user   # run one module's tests
@@ -61,9 +61,11 @@ Useful env vars (see `server.py` header and ADR-010):
   test-only) are the two implementations. Nothing above this line knows which one
   it's talking to.
 - **Modules are plugins**: discovered via `entry_points` (group `adb_mcp.modules`),
-  declared in `../pyproject.toml`. Built-in modules (`diagnostics`, `device_info`,
-  `connection`, `user`, `logger`) use the exact same mechanism a third-party package
-  would — no special-cased "core module" path.
+  declared in `../pyproject.toml` — the file's `[project.entry-points."adb_mcp.modules"]`
+  table is the authoritative list (~20+ built-in modules, e.g. `diagnostics`,
+  `device_info`, `connection`, `user`, `logger`, `packages`, `files`, `screen`,
+  `input`, `ui`). Built-ins use the exact same mechanism a third-party package would —
+  no special-cased "core module" path.
 - **Registry** (`registry.py`) wires it all together at import time: discovers
   manifests, asks `PolicyEngine` whether each tool is allowed *before* registering it
   with `FastMCP` (a denied tool is never exposed to the client at all), wraps allowed

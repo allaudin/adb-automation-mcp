@@ -23,7 +23,7 @@ pip install android-adb-mcp
 
 ```bash
 uv sync
-uv run adb-mcp-server
+uv run android-adb-mcp
 ```
 
 Talks to the `adb` binary on `PATH` by default. For real-device setup, the fake

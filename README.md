@@ -1,4 +1,4 @@
-# adb-mcp-server
+# android-adb-mcp
 
 <!-- mcp-name: io.github.allaudin/adb-mcp-server -->
 

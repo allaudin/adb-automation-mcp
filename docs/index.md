@@ -45,10 +45,11 @@ ADB_AUTOMATION_BACKEND=fake uv run adb-automation-mcp
 ### Where saved files go (`ADB_AUTOMATION_LOCAL_ROOT`)
 
 A few tools save a file to this machine when you ask them to: `pull_file` (copies a
-file off the device) and `stop_log_session` (saves a captured log).
-`ADB_AUTOMATION_LOCAL_ROOT` is the one folder each of those tools is allowed to write
-into — there's no fallback location, so both refuse to run until it's set.
-(`take_screenshot` does *not* write a file — it returns the PNG bytes directly.)
+file off the device), `stop_log_session` (saves a captured log), and
+`take_screenshot` when called with `save=true` (it always returns the PNG inline;
+`save=true` *also* writes it to disk). `ADB_AUTOMATION_LOCAL_ROOT` is the one folder
+these tools are allowed to write into — there's no fallback location, so they refuse
+to save until it's set.
 
 Each tool's `local_path` argument is a path *inside* that folder. With
 `ADB_AUTOMATION_LOCAL_ROOT=/home/you/adb-downloads` set:
@@ -57,6 +58,9 @@ Each tool's `local_path` argument is a path *inside* that folder. With
   `/home/you/adb-downloads/ui-dump.xml`
 - `stop_log_session(..., local_path="session1.log")` writes to
   `/home/you/adb-downloads/session1.log`
+- `take_screenshot(..., save=true)` writes to
+  `/home/you/adb-downloads/screenshots/screenshot-<serial>-<timestamp>.png`
+  (or `screenshots/<filename>.png` when `filename=` is given)
 
 A `local_path` that tries to escape that folder — `../elsewhere`, or an absolute path
 pointing somewhere else — is rejected rather than written anywhere.

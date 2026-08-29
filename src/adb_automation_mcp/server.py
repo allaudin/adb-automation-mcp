@@ -10,8 +10,9 @@ Env vars read at startup:
     ADB_AUTOMATION_ALLOW_DESTRUCTIVE=1  flip the default policy posture to also allow destructive
                                  tools (e.g. remove_user); denied by default
     ADB_AUTOMATION_LOCAL_ROOT         the folder on this machine where file-saving tools
-                                 (pull_file, stop_log_session) are allowed to write;
-                                 unset means those tools refuse to write anywhere
+                                 (pull_file, stop_log_session, take_screenshot with
+                                 save=true) are allowed to write; unset means those
+                                 tools refuse to write anywhere
 
 The legacy ADB_MCP_* names (from before the project was renamed) are still read as a
 fallback, with a deprecation warning; prefer the ADB_AUTOMATION_* names.

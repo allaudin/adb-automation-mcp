@@ -601,6 +601,38 @@ pull, `bugreportz`, etc.).
 
 ---
 
+## ADR-021: `take_screenshot` Optional `save`
+
+**Status:** Accepted — extends ADR-020
+
+**Context:** ADR-020 removed `take_screenshot`'s host-file write so the tool became a
+pure "return the PNG bytes" call. But some callers legitimately want a file on the
+host too — to diff screenshots across a run, attach one to a bug, or keep a capture
+log — and the only workaround was a separate `pull_file` against a path the tool
+doesn't even leave on the device any more.
+
+**Decision:** Add two optional parameters, `save: bool = False` and
+`filename: str | None = None`. With `save=True` the PNG is *also* written to
+`<ADB_AUTOMATION_LOCAL_ROOT>/screenshots/` — reusing the shared `local_root` seam
+(and its `PolicyViolationError` → `POLICY_DENIED` semantics) that `pull_file` and
+`stop_log_session` already use, not a screen-specific mechanism. The `screen`
+module's `service_factory` reads `ADB_AUTOMATION_LOCAL_ROOT` the same way
+`logger`/`files` do. Files land in a fixed `screenshots/` subdirectory (not the root
+directly) so a caller can't scatter PNGs across the whole allow-listed tree; the
+`filename` is validated as a bare name (no path separators → `INVALID_ARGUMENT`) and
+`.png` is enforced, then still funnelled through `_resolve_local_path` as
+defence-in-depth. `save=False` (the default) is byte-for-byte the ADR-020 behaviour,
+and the inline MCP image content block is returned unconditionally either way — so
+`save` is purely additive, not a mode switch.
+
+**Consequences:** `screen` regains a `local_root` dependency, but only exercised on
+the opt-in path — a server with no `ADB_AUTOMATION_LOCAL_ROOT` set is unchanged
+unless a caller passes `save=true`, which then fails loudly with `POLICY_DENIED`
+rather than silently not saving. This is a minor, backward-compatible addition (new
+optional params) — no version-major implications, unlike ADR-020 itself.
+
+---
+
 ## Deferred / Open Questions
 
 Decisions deliberately not made yet, with the condition that would trigger revisiting

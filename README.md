@@ -82,6 +82,40 @@ uv run ruff check .   # lint
 uv run mkdocs build --strict   # docs site
 ```
 
+## Tools
+
+<!-- stats:tools-summary -->**42 tools in 21 modules.**<!-- /stats:tools-summary --> Full
+signatures, docstrings, and worked examples are in the
+[tool reference](https://allaudin.github.io/adb-automation-mcp/reference/diagnostics/).
+Tools marked † are `destructive` — not registered unless
+`ADB_AUTOMATION_ALLOW_DESTRUCTIVE=1`.
+
+<!-- stats:tools-table -->
+| Module | Tools |
+|---|---|
+| `activities` (1) | `start_activity` |
+| `android_services` (1) | `start_service` |
+| `app_data` (1) | `clear_app_data`† |
+| `broadcasts` (1) | `send_broadcast` |
+| `connection` (4) | `restart_adb_server`, `connect_device`, `disconnect_device`, `restart_adbd_as_root`† |
+| `date_time` (1) | `get_date_time` |
+| `device_info` (1) | `list_connected_devices` |
+| `diagnostics` (1) | `check_adb_available` |
+| `files` (1) | `pull_file` |
+| `input` (1) | `tap` |
+| `logger` (6) | `read_logs`, `clear_logs`, `get_log_buffer_size`, `read_package_logs`, `start_log_session`, `stop_log_session` |
+| `network` (1) | `list_network_interfaces` |
+| `packages` (4) | `list_packages`, `install_apk`, `uninstall_package`†, `install_existing_for_user` |
+| `permissions` (1) | `grant_permission` |
+| `power` (1) | `get_power_state` |
+| `processes` (1) | `force_stop_app` |
+| `screen` (1) | `take_screenshot` |
+| `settings` (1) | `get_setting` |
+| `system_properties` (4) | `get_property`, `list_properties`, `get_property_metadata`, `set_property` |
+| `ui` (1) | `dump_ui_hierarchy` |
+| `user` (8) | `get_current_user`, `dump_user`, `user_info`, `list_users`, `switch_user`, `create_user`, `remove_user`†, `get_user_capabilities` |
+<!-- /stats:tools-table -->
+
 ## License
 
 [MIT](LICENSE)

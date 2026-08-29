@@ -28,6 +28,7 @@ from typing import Any
 
 from fastmcp import FastMCP
 
+from adb_automation_mcp import __version__
 from adb_automation_mcp.backend.protocol import AdbBackend
 from adb_automation_mcp.backend.subprocess_backend import SubprocessBackend
 from adb_automation_mcp.backend.testing import FakeBackend
@@ -76,7 +77,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
     yield {"backend": backend, "services": services}
 
 
-mcp = FastMCP(name="adb-automation-mcp", lifespan=app_lifespan)
+mcp = FastMCP(name="adb-automation-mcp", version=__version__, lifespan=app_lifespan)
 _registry.register_tools(mcp, _manifests)
 _registry.register_resources(mcp, _manifests)
 

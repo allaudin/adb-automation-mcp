@@ -63,13 +63,14 @@ def test_readme_module_tool_table_matches_registry() -> None:
         )
 
 
-def test_tools_summary_matches_registry_in_readme_and_docs() -> None:
-    total, modules = _totals()
-    want = f"**{total} tools in {modules} modules.**"
+def test_tools_count_matches_registry_in_readme_and_docs() -> None:
+    total, _ = _totals()
     problems = []
     for label, path in (("README.md", _README), ("docs/index.md", _DOCS_INDEX)):
-        got = _fenced(path.read_text(), "stats:tools-summary")
-        if got != want:
-            problems.append(f"{label}: has {got!r}, want {want!r}")
+        m = re.search(r"\*\*(\d+) tools\.\*\*", path.read_text())
+        if m is None:
+            problems.append(f"{label}: no '**N tools.**' line found")
+        elif int(m.group(1)) != total:
+            problems.append(f"{label}: says '**{m.group(1)} tools.**', registry has {total}")
     if problems:
-        pytest.fail("tool-count summary is stale:\n  - " + "\n  - ".join(problems))
+        pytest.fail("tool count is stale:\n  - " + "\n  - ".join(problems))

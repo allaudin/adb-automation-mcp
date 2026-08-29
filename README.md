@@ -84,8 +84,7 @@ uv run mkdocs build --strict   # docs site
 
 ## Tools
 
-<!-- stats:tools-summary -->**42 tools in 21 modules.**<!-- /stats:tools-summary --> Full
-signatures, docstrings, and worked examples are in the
+**42 tools.** Full signatures, docstrings, and worked examples are in the
 [tool reference](https://allaudin.github.io/adb-automation-mcp/reference/diagnostics/).
 Tools marked † are `destructive` — not registered unless
 `ADB_AUTOMATION_ALLOW_DESTRUCTIVE=1`.

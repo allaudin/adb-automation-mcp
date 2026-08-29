@@ -509,6 +509,45 @@ note in `ARCHITECTURE.md` §1, though it predates a dedicated ADR entry).
 
 ---
 
+## ADR-019: `app_data` Clears Full Data, Not Cache-Only
+
+**Status:** Accepted — supersedes the original cache-only scope of the `app_data`
+module
+
+**Context:** The `app_data` module originally exposed a single tool, `clear_app_cache`,
+running `adb shell pm clear --cache-only` and deliberately refusing to fall back to
+an unscoped `pm clear` (a dedicated `CacheOnlyUnsupportedError` was raised instead).
+Device testing showed `--cache-only` is unsupported on a large share of real devices —
+it is an Android 11+ (API 30) `PackageManagerShellCommand` addition — so the tool
+failed outright there. There is no reliable cross-version ADB substitute for a
+per-package cache-only clear: `pm trim-caches <size>` is device-wide and needs a
+system permission, and deleting `/data/data/<pkg>/cache` directly needs root. The
+only `pm clear` variant supported on effectively every Android version is the
+unscoped one, which wipes the package's databases, shared preferences, files *and*
+cache.
+
+**Decision:** Repurpose the module to run the unscoped `adb shell pm clear <pkg>`
+(plus optional `--user`). Rename `clear_app_cache` → `clear_app_data`, the service
+method and result model to match (`ClearAppDataResult`), and recategorize the tool
+`@category("read"|"write"|"destructive")` → `destructive` — a full data wipe is
+squarely destructive, consistent with `uninstall_package`/`remove_user`, so it is
+deny-by-default and only registered when the server opts in
+(`ADB_AUTOMATION_ALLOW_DESTRUCTIVE=1`). The `--cache-only` option-parsing failure
+branch and its "never silently fall back to a full clear" guard are dropped, since a
+full clear is now the intended behavior. `CacheOnlyUnsupportedError` is left in
+`errors.py` unused rather than removed, to keep this change scoped to the one module.
+Not verified live (no device was available in this environment) — the success/failure
+text classification is unchanged from the cache-only implementation, which was
+itself shaped on documented `runClear()` behavior.
+
+**Consequences:** Callers of `clear_app_cache` must migrate to `clear_app_data` and
+understand it now resets the app to a fresh-install state, not just frees cached
+files. Servers that do not set `ADB_AUTOMATION_ALLOW_DESTRUCTIVE=1` no longer see
+this tool at all. A cache-only tool could be reintroduced later, gated on the
+device's API level, if a real need appears.
+
+---
+
 ## Deferred / Open Questions
 
 Decisions deliberately not made yet, with the condition that would trigger revisiting

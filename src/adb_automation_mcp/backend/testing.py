@@ -59,7 +59,7 @@ class FakeBackend:
         start_service_result: CommandResult | None = None,
         force_stop_result: CommandResult | None = None,
         pull_result: CommandResult | None = None,
-        clear_app_cache_result: CommandResult | None = None,
+        clear_app_data_result: CommandResult | None = None,
         screencap_result: CommandResult | None = None,
         input_tap_result: CommandResult | None = None,
         uiautomator_dump_result: CommandResult | None = None,
@@ -374,17 +374,17 @@ class FakeBackend:
         # whatever remote_path is actually pulled" — see pull() below, same
         # convention as connect_result. Real, long-stable `adb pull` wording.
         self._pull_result = pull_result
-        # `adb shell pm clear --cache-only` — PackageManagerShellCommand's
-        # documented, long-stable success text: a bare "Success". Not
-        # captured from a live device in this environment (none was
-        # available); same caveat as force_stop_result above.
-        self._clear_app_cache_result = clear_app_cache_result or CommandResult(
+        # `adb shell pm clear` — PackageManagerShellCommand's documented,
+        # long-stable success text: a bare "Success". Not captured from a
+        # live device in this environment (none was available); same caveat
+        # as force_stop_result above.
+        self._clear_app_data_result = clear_app_data_result or CommandResult(
             stdout="Success\n", stderr="", exit_code=0, duration_ms=110.0
         )
         # `screencap -p <path>` — real behavior is silent on success (writes
         # the PNG to the given path, no stdout). Not captured from a live
         # device in this environment (none was available); same caveat as
-        # clear_app_cache_result above.
+        # clear_app_data_result above.
         self._screencap_result = screencap_result or CommandResult(
             stdout="", stderr="", exit_code=0, duration_ms=250.0
         )
@@ -599,8 +599,8 @@ class FakeBackend:
                 exit_code=0,
                 duration_ms=300.0,
             )
-        if command.startswith("pm clear --cache-only "):
-            return self._clear_app_cache_result
+        if command.startswith("pm clear "):
+            return self._clear_app_data_result
         if command.startswith("screencap -p "):
             return self._screencap_result
         if command.startswith("am broadcast "):

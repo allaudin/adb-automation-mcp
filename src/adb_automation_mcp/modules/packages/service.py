@@ -244,7 +244,7 @@ class PackagesService:
         # dedicated install/uninstall primitive, whose (serial, package,
         # keep_data) signature has no way to express --user or
         # --versionCode. Reusing shell() here follows the same convention
-        # list_packages/grant_permission/clear_app_cache already use for pm
+        # list_packages/grant_permission/clear_app_data already use for pm
         # subcommands, and keeps AdbBackend unchanged rather than growing a
         # new primitive for every pm flag.
         parts = ["pm", "uninstall"]

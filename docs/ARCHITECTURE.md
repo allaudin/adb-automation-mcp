@@ -79,7 +79,7 @@ supported install/uninstall flags — no raw flag string is ever accepted from
 a client. `install_apk` reuses `AdbBackend.install`'s existing
 `(serial, apk_path, flags: list[str])` contract unchanged; `uninstall_package`
 and `install_existing_for_user` go through `AdbBackend.shell` (the same route
-`list_packages`/`grant_permission`/`clear_app_cache` already use for `pm`
+`list_packages`/`grant_permission`/`clear_app_data` already use for `pm`
 subcommands) rather than extending `AdbBackend.uninstall`, since that
 primitive's `(serial, package, keep_data)` signature has no way to express
 `--user`/`--versionCode` — `AdbBackend` itself was not changed. Not verified

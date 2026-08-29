@@ -11,7 +11,6 @@ from adb_automation_mcp.backend.testing import FakeBackend
 from adb_automation_mcp.errors import (
     AndroidRejectionError,
     BackendError,
-    CacheOnlyUnsupportedError,
     DeviceNotFoundError,
     PackageNotFoundError,
     PermissionDeniedError,
@@ -20,10 +19,10 @@ from adb_automation_mcp.modules.app_data.service import AppDataService
 
 
 @pytest.mark.asyncio
-async def test_clear_app_cache__success() -> None:
+async def test_clear_app_data__success() -> None:
     service = AppDataService(FakeBackend())
 
-    result = await service.clear_app_cache("emulator-5554", "com.example.app")
+    result = await service.clear_app_data("emulator-5554", "com.example.app")
 
     assert result.serial == "emulator-5554"
     assert result.package_name == "com.example.app"
@@ -32,7 +31,7 @@ async def test_clear_app_cache__success() -> None:
 
 
 @pytest.mark.asyncio
-async def test_clear_app_cache__sends_cache_only_and_user_id_flags() -> None:
+async def test_clear_app_data__sends_bare_pm_clear_and_user_id_flag() -> None:
     captured: dict[str, str] = {}
 
     class RecordingBackend(FakeBackend):
@@ -42,74 +41,56 @@ async def test_clear_app_cache__sends_cache_only_and_user_id_flags() -> None:
 
     service = AppDataService(RecordingBackend())
 
-    result = await service.clear_app_cache("emulator-5554", "com.example.app", user_id=10)
+    result = await service.clear_app_data("emulator-5554", "com.example.app", user_id=10)
 
-    assert captured["command"] == "pm clear --cache-only --user 10 com.example.app"
+    assert captured["command"] == "pm clear --user 10 com.example.app"
     assert result.user_id == 10
 
 
 @pytest.mark.asyncio
-async def test_clear_app_cache__package_not_found_raises_package_not_found() -> None:
+async def test_clear_app_data__no_user_id_omits_user_flag() -> None:
+    captured: dict[str, str] = {}
+
+    class RecordingBackend(FakeBackend):
+        async def shell(self, serial: str, command: str) -> CommandResult:
+            captured["command"] = command
+            return await super().shell(serial, command)
+
+    service = AppDataService(RecordingBackend())
+
+    await service.clear_app_data("emulator-5554", "com.example.app")
+
+    assert captured["command"] == "pm clear com.example.app"
+
+
+@pytest.mark.asyncio
+async def test_clear_app_data__package_not_found_raises_package_not_found() -> None:
     backend = FakeBackend(
-        clear_app_cache_result=CommandResult(
+        clear_app_data_result=CommandResult(
             stdout="", stderr="Error: Package not found: com.example.bogus\n", exit_code=1, duration_ms=15.0
         )
     )
     service = AppDataService(backend)
 
     with pytest.raises(PackageNotFoundError):
-        await service.clear_app_cache("emulator-5554", "com.example.bogus")
+        await service.clear_app_data("emulator-5554", "com.example.bogus")
 
 
 @pytest.mark.asyncio
-async def test_clear_app_cache__unsupported_cache_only_raises_cache_only_unsupported() -> None:
+async def test_clear_app_data__android_rejection_raises_android_rejection() -> None:
     backend = FakeBackend(
-        clear_app_cache_result=CommandResult(
-            stdout="", stderr="Error: Unknown option: --cache-only\n", exit_code=1, duration_ms=10.0
-        )
-    )
-    service = AppDataService(backend)
-
-    with pytest.raises(CacheOnlyUnsupportedError):
-        await service.clear_app_cache("emulator-5554", "com.example.app")
-
-
-@pytest.mark.asyncio
-async def test_clear_app_cache__unsupported_cache_only_never_falls_back_to_full_clear() -> None:
-    # The failing command must still have asked for --cache-only — this
-    # service must never retry without it.
-    captured: dict[str, str] = {}
-
-    class RecordingBackend(FakeBackend):
-        async def shell(self, serial: str, command: str) -> CommandResult:
-            captured["command"] = command
-            return CommandResult(
-                stdout="", stderr="Error: Unknown option: --cache-only\n", exit_code=1, duration_ms=10.0
-            )
-
-    service = AppDataService(RecordingBackend())
-
-    with pytest.raises(CacheOnlyUnsupportedError):
-        await service.clear_app_cache("emulator-5554", "com.example.app")
-
-    assert captured["command"] == "pm clear --cache-only com.example.app"
-
-
-@pytest.mark.asyncio
-async def test_clear_app_cache__android_rejection_raises_android_rejection() -> None:
-    backend = FakeBackend(
-        clear_app_cache_result=CommandResult(stdout="Failed\n", stderr="", exit_code=0, duration_ms=40.0)
+        clear_app_data_result=CommandResult(stdout="Failed\n", stderr="", exit_code=0, duration_ms=40.0)
     )
     service = AppDataService(backend)
 
     with pytest.raises(AndroidRejectionError):
-        await service.clear_app_cache("emulator-5554", "com.example.app")
+        await service.clear_app_data("emulator-5554", "com.example.app")
 
 
 @pytest.mark.asyncio
-async def test_clear_app_cache__permission_denial_raises_permission_denied() -> None:
+async def test_clear_app_data__permission_denial_raises_permission_denied() -> None:
     backend = FakeBackend(
-        clear_app_cache_result=CommandResult(
+        clear_app_data_result=CommandResult(
             stdout="",
             stderr="java.lang.SecurityException: Permission Denial: clearApplicationUserData\n",
             exit_code=1,
@@ -119,30 +100,30 @@ async def test_clear_app_cache__permission_denial_raises_permission_denied() -> 
     service = AppDataService(backend)
 
     with pytest.raises(PermissionDeniedError):
-        await service.clear_app_cache("emulator-5554", "com.example.app")
+        await service.clear_app_data("emulator-5554", "com.example.app")
 
 
 @pytest.mark.asyncio
-async def test_clear_app_cache__unknown_serial_raises_device_not_found() -> None:
+async def test_clear_app_data__unknown_serial_raises_device_not_found() -> None:
     backend = FakeBackend(
-        clear_app_cache_result=CommandResult(
+        clear_app_data_result=CommandResult(
             stdout="", stderr="adb: device 'bogus' not found\n", exit_code=1, duration_ms=10.0
         )
     )
     service = AppDataService(backend)
 
     with pytest.raises(DeviceNotFoundError):
-        await service.clear_app_cache("bogus", "com.example.app")
+        await service.clear_app_data("bogus", "com.example.app")
 
 
 @pytest.mark.asyncio
-async def test_clear_app_cache__unclassified_backend_failure_raises_backend_error() -> None:
+async def test_clear_app_data__unclassified_backend_failure_raises_backend_error() -> None:
     backend = FakeBackend(
-        clear_app_cache_result=CommandResult(
+        clear_app_data_result=CommandResult(
             stdout="", stderr="Error: Package manager has died\n", exit_code=1, duration_ms=5.0
         )
     )
     service = AppDataService(backend)
 
     with pytest.raises(BackendError):
-        await service.clear_app_cache("emulator-5554", "com.example.app")
+        await service.clear_app_data("emulator-5554", "com.example.app")

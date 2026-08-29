@@ -6,12 +6,12 @@ registers at server startup.
 from __future__ import annotations
 
 from adb_automation_mcp.modules.app_data.service import AppDataService
-from adb_automation_mcp.modules.app_data.tools import clear_app_cache
+from adb_automation_mcp.modules.app_data.tools import clear_app_data
 from adb_automation_mcp.registry import ModuleManifest
 
 MODULE = ModuleManifest(
     name="app_data",
     service_factory=AppDataService,
-    tools=[clear_app_cache],
+    tools=[clear_app_data],
     resources=[],
 )

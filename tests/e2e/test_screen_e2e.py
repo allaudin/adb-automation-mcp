@@ -6,133 +6,93 @@ concurrent edits to a shared test file.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
-from pathlib import Path
-from typing import Any
+import base64
 
 import pytest
-from fastmcp import Client, FastMCP
+from fastmcp import Client
 
-from adb_automation_mcp.backend.protocol import CommandResult
+from adb_automation_mcp.backend.protocol import ExecOutResult
 from adb_automation_mcp.backend.testing import FakeBackend
-from adb_automation_mcp.modules.screen.service import ScreenService
-from adb_automation_mcp.policy import PolicyConfig, PolicyEngine
-from adb_automation_mcp.registry import Registry, discover_modules
+from tests.e2e.test_protocol_e2e import _build_test_server
 
-
-def _build_test_server_with_local_root(backend: FakeBackend, local_root: Path | None) -> FastMCP:
-    # screen.take_screenshot needs a configured local_root, which the shared
-    # _build_test_server helper in test_protocol_e2e.py doesn't parameterize
-    # (no other module needed it before files/screen), so this builds a
-    # server the same way but constructs the screen service directly with
-    # local_root instead of reading ADB_AUTOMATION_LOCAL_ROOT from the environment.
-    manifests = discover_modules()
-    registry = Registry(policy=PolicyEngine(PolicyConfig()))
-
-    @asynccontextmanager
-    async def lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
-        services = registry.build_services(backend, manifests)
-        services["screen"] = ScreenService(backend, local_root=local_root)
-        yield {"backend": backend, "services": services}
-
-    mcp = FastMCP("test-server", lifespan=lifespan)
-    registry.register_tools(mcp, manifests)
-    registry.register_resources(mcp, manifests)
-    return mcp
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
 @pytest.mark.asyncio
-async def test_take_screenshot_tool_round_trips_over_mcp_protocol(tmp_path: Path) -> None:
-    mcp = _build_test_server_with_local_root(FakeBackend(), tmp_path)
+async def test_take_screenshot_tool_returns_image_content_block() -> None:
+    mcp = _build_test_server(FakeBackend())
 
     async with Client(mcp) as client:
-        result = await client.call_tool(
-            "take_screenshot", {"serial": "emulator-5554", "local_path": "screen.png"}
-        )
+        result = await client.call_tool("take_screenshot", {"serial": "emulator-5554"})
 
+    # The screenshot comes back as a real MCP image content block.
+    image_blocks = [c for c in result.content if getattr(c, "type", None) == "image"]
+    assert len(image_blocks) == 1
+    assert image_blocks[0].mimeType == "image/png"
+    assert base64.b64decode(image_blocks[0].data).startswith(_PNG_SIGNATURE)
+
+    # Structured metadata rides along in the envelope; raw bytes are not duplicated there.
     assert result.data.status == "success"
     assert result.data.data.serial == "emulator-5554"
-    assert result.data.data.local_path == str(tmp_path / "screen.png")
+    assert result.data.data.mime_type == "image/png"
+    assert result.data.data.width == 2
+    assert result.data.data.height == 2
+    assert result.data.data.size_bytes > 0
     assert result.data.data.success is True
 
 
 @pytest.mark.asyncio
-async def test_take_screenshot_tool_no_local_root_returns_policy_denied_error() -> None:
-    mcp = _build_test_server_with_local_root(FakeBackend(), None)
+async def test_take_screenshot_tool_accepts_display_id() -> None:
+    captured: dict[str, str] = {}
+
+    class RecordingBackend(FakeBackend):
+        async def exec_out(self, serial: str, command: str) -> ExecOutResult:
+            captured["command"] = command
+            return await super().exec_out(serial, command)
+
+    mcp = _build_test_server(RecordingBackend())
 
     async with Client(mcp) as client:
         result = await client.call_tool(
-            "take_screenshot", {"serial": "emulator-5554", "local_path": "screen.png"}
+            "take_screenshot", {"serial": "emulator-5554", "display_id": 2}
         )
 
-    assert result.data.status == "error"
-    assert result.data.error is not None
-    assert result.data.error.code == "POLICY_DENIED"
+    assert result.data.status == "success"
+    assert result.data.data.display_id == 2
+    assert captured["command"] == "screencap -p -d 2"
 
 
 @pytest.mark.asyncio
-async def test_take_screenshot_tool_screencap_failure_returns_backend_error(tmp_path: Path) -> None:
+async def test_take_screenshot_tool_screencap_failure_returns_backend_error() -> None:
     backend = FakeBackend(
-        screencap_result=CommandResult(
-            stdout="", stderr="Error: unable to open display\n", exit_code=1, duration_ms=20.0
+        exec_out_result=ExecOutResult(
+            stdout=b"", stderr="Error: unable to open display\n", exit_code=1, duration_ms=20.0
         )
     )
-    mcp = _build_test_server_with_local_root(backend, tmp_path)
+    mcp = _build_test_server(backend)
 
     async with Client(mcp) as client:
-        result = await client.call_tool(
-            "take_screenshot", {"serial": "emulator-5554", "local_path": "screen.png"}
-        )
+        result = await client.call_tool("take_screenshot", {"serial": "emulator-5554"})
 
     assert result.data.status == "error"
     assert result.data.error is not None
     assert result.data.error.code == "BACKEND_ERROR"
+    assert not any(getattr(c, "type", None) == "image" for c in result.content)
 
 
 @pytest.mark.asyncio
-async def test_take_screenshot_tool_pull_failure_returns_remote_file_not_found_error(tmp_path: Path) -> None:
+async def test_take_screenshot_tool_unknown_serial_returns_device_not_found_error() -> None:
+    # `adb exec-out` wording, captured live from a real emulator.
     backend = FakeBackend(
-        pull_result=CommandResult(
-            stdout="",
-            stderr="adb: error: remote object '/data/local/tmp/adb_automation_mcp_screenshot_x.png' does not exist\n",
-            exit_code=1,
-            duration_ms=15.0,
+        exec_out_result=ExecOutResult(
+            stdout=b"", stderr="error: device 'bogus' not found\n", exit_code=255, duration_ms=10.0
         )
     )
-    mcp = _build_test_server_with_local_root(backend, tmp_path)
+    mcp = _build_test_server(backend)
 
     async with Client(mcp) as client:
-        result = await client.call_tool(
-            "take_screenshot", {"serial": "emulator-5554", "local_path": "screen.png"}
-        )
+        result = await client.call_tool("take_screenshot", {"serial": "bogus"})
 
     assert result.data.status == "error"
     assert result.data.error is not None
-    assert result.data.error.code == "REMOTE_FILE_NOT_FOUND"
-
-
-@pytest.mark.asyncio
-async def test_take_screenshot_tool_cleanup_runs_regardless_of_pull_outcome(tmp_path: Path) -> None:
-    shell_commands: list[str] = []
-
-    class RecordingBackend(FakeBackend):
-        async def shell(self, serial: str, command: str) -> CommandResult:
-            shell_commands.append(command)
-            return await super().shell(serial, command)
-
-    backend = RecordingBackend(
-        pull_result=CommandResult(
-            stdout="", stderr="adb: error: remote object 'x' does not exist\n", exit_code=1, duration_ms=15.0
-        )
-    )
-    mcp = _build_test_server_with_local_root(backend, tmp_path)
-
-    async with Client(mcp) as client:
-        result = await client.call_tool(
-            "take_screenshot", {"serial": "emulator-5554", "local_path": "screen.png"}
-        )
-
-    assert result.data.status == "error"
-    rm_commands = [c for c in shell_commands if c.startswith("rm -f /data/local/tmp/adb_automation_mcp_screenshot_")]
-    assert len(rm_commands) == 1
+    assert result.data.error.code == "DEVICE_NOT_FOUND"

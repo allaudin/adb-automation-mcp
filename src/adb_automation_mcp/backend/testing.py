@@ -8,8 +8,18 @@ NotImplementedError loudly rather than returning silently-wrong fake data.
 
 from __future__ import annotations
 
-from adb_automation_mcp.backend.protocol import CommandResult, DeviceInfo
+import base64
+
+from adb_automation_mcp.backend.protocol import CommandResult, DeviceInfo, ExecOutResult
 from adb_automation_mcp.errors import AdbUnavailableError
+
+# A real, minimal 2x2 RGBA PNG (77 bytes) — the deterministic stand-in for
+# `adb exec-out screencap -p` output. Generated once with Python's zlib/struct
+# PNG encoder (a genuine, decodable PNG with a valid IHDR/IDAT/IEND), not
+# hand-invented byte soup, so tests that parse its dimensions get real answers.
+_FAKE_SCREENCAP_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR42mP4z8DwHwyBNBAw/AcAR8oI+FuapL4AAAAASUVORK5CYII="
+)
 
 
 class FakeBackend:
@@ -60,7 +70,7 @@ class FakeBackend:
         force_stop_result: CommandResult | None = None,
         pull_result: CommandResult | None = None,
         clear_app_data_result: CommandResult | None = None,
-        screencap_result: CommandResult | None = None,
+        exec_out_result: ExecOutResult | None = None,
         input_tap_result: CommandResult | None = None,
         uiautomator_dump_result: CommandResult | None = None,
         ui_hierarchy_cat_result: CommandResult | None = None,
@@ -381,16 +391,15 @@ class FakeBackend:
         self._clear_app_data_result = clear_app_data_result or CommandResult(
             stdout="Success\n", stderr="", exit_code=0, duration_ms=110.0
         )
-        # `screencap -p <path>` — real behavior is silent on success (writes
-        # the PNG to the given path, no stdout). Not captured from a live
-        # device in this environment (none was available); same caveat as
-        # clear_app_data_result above.
-        self._screencap_result = screencap_result or CommandResult(
-            stdout="", stderr="", exit_code=0, duration_ms=250.0
+        # `adb exec-out screencap -p` — streams the raw PNG on stdout, nothing
+        # on stderr, exit 0. The default fixture is a real (tiny) PNG; see
+        # _FAKE_SCREENCAP_PNG above.
+        self._exec_out_result = exec_out_result or ExecOutResult(
+            stdout=_FAKE_SCREENCAP_PNG, stderr="", exit_code=0, duration_ms=250.0
         )
         # `input tap x y` — real behavior is silent on success (no stdout).
         # Not captured from a live device in this environment (none was
-        # available); same caveat as screencap_result above.
+        # available); same caveat as exec_out_result above.
         self._input_tap_result = input_tap_result or CommandResult(
             stdout="", stderr="", exit_code=0, duration_ms=45.0
         )
@@ -522,6 +531,10 @@ class FakeBackend:
         self._raise_if_unavailable()
         return list(self._devices)
 
+    async def exec_out(self, serial: str, command: str) -> ExecOutResult:
+        self._raise_if_unavailable()
+        return self._exec_out_result
+
     async def shell(self, serial: str, command: str) -> CommandResult:
         self._raise_if_unavailable()
         if command.startswith("dumpsys user --user "):
@@ -601,8 +614,6 @@ class FakeBackend:
             )
         if command.startswith("pm clear "):
             return self._clear_app_data_result
-        if command.startswith("screencap -p "):
-            return self._screencap_result
         if command.startswith("am broadcast "):
             return self._send_broadcast_result
         if command.startswith("am start-service "):

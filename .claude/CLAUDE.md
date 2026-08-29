@@ -74,7 +74,10 @@ Useful env vars (see `server.py` header and ADR-010):
   (`status`/`message`/`data`/`error`) — always `isError: false` at the MCP level; a
   domain failure is `status: "error"` in the payload, not a protocol-level error.
   Module/service code raises typed `AdbError` subclasses; only the registry wrapper
-  builds the envelope.
+  builds the envelope. One documented exception (ADR-020): a tool marked
+  `@image_content` (currently only `take_screenshot`) also gets an MCP image content
+  block on success, built from its result's `image_bytes`; its errors still envelope
+  normally.
 - **Policy**: category default posture (`destructive` denied unless
   `ADB_AUTOMATION_ALLOW_DESTRUCTIVE=1`) plus explicit allow/deny lists by tool name,
   evaluated once at registration time. `local_root` (host filesystem writes) is a

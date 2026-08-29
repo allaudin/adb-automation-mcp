@@ -198,6 +198,7 @@ classDiagram
         <<Protocol>>
         +list_devices() list~DeviceInfo~
         +shell(serial, command) CommandResult
+        +exec_out(serial, command) ExecOutResult
         +install(serial, apk_path, options) CommandResult
         +uninstall(serial, package, keep_data) CommandResult
         +push(serial, local_path, remote_path) CommandResult
@@ -218,7 +219,9 @@ classDiagram
 
 `CommandResult` (`stdout`, `stderr`, `exit_code`, `duration_ms`) is returned uniformly
 by both implementations, so module code and tests assert against the same shape
-regardless of which backend is running underneath.
+regardless of which backend is running underneath. `exec_out` is the one exception:
+it returns `ExecOutResult`, identical but with `stdout` as raw `bytes` (not decoded),
+for binary output such as `screencap -p` — see ADR-020.
 
 ### Service
 
@@ -272,6 +275,11 @@ four-key shape:
 Backend and module code never construct this directly — they return data or raise a
 typed `AdbError` subclass, and a single wrapper at the registry boundary
 (`wrap_with_envelope`) converts whichever happened into the envelope.
+
+One tool deviates: `take_screenshot` is marked `@image_content`, so on success the
+wrapper *also* emits an MCP image content block built from the result's raw bytes
+(the envelope still rides along as `structuredContent`). Errors are enveloped
+exactly like every other tool. See ADR-020.
 
 ## 5. How They Work Together — A Tool Call
 

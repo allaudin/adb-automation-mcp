@@ -4,8 +4,9 @@
 `shell` are exercised by modules built so far (diagnostics, device_info, connection, user);
 `install` is used by the packages module's install_apk (uninstall and
 install-existing-for-user go through `shell` instead — see packages/service.py for
-why). `uninstall` and `push` are implemented to the same standard but not yet used by
-any module; `pull` is used by files and screen. None of these have automated
+why). `exec_out` (raw-bytes stdout, via `adb exec-out`) is used by the screen module's
+take_screenshot. `uninstall` and `push` are implemented to the same standard but not yet
+used by any module; `pull` is used by files. None of these have automated
 contract-test coverage against the real binary yet — verified manually against a real
 device instead.
 """
@@ -16,7 +17,7 @@ import asyncio
 import shutil
 from asyncio.subprocess import Process
 
-from adb_automation_mcp.backend.protocol import CommandResult, DeviceInfo
+from adb_automation_mcp.backend.protocol import CommandResult, DeviceInfo, ExecOutResult
 from adb_automation_mcp.errors import AdbTimeoutError, AdbUnavailableError
 
 DEFAULT_TIMEOUT_S = 10.0
@@ -35,7 +36,11 @@ class SubprocessBackend:
         self._adb_path = adb_path or shutil.which("adb") or "adb"
         self._timeout_s = timeout_s
 
-    async def _run(self, *args: str) -> CommandResult:
+    async def _run_bytes(self, *args: str) -> ExecOutResult:
+        """Spawn adb and capture stdout as raw bytes (stderr still decoded). The
+        common path for both _run (which decodes stdout) and exec_out (which
+        must not, since its output is binary).
+        """
         loop = asyncio.get_running_loop()
         start = loop.time()
 
@@ -68,11 +73,20 @@ class SubprocessBackend:
             ) from exc
 
         duration_ms = (loop.time() - start) * 1000
-        return CommandResult(
-            stdout=stdout_b.decode("utf-8", errors="replace"),
+        return ExecOutResult(
+            stdout=stdout_b,
             stderr=stderr_b.decode("utf-8", errors="replace"),
             exit_code=proc.returncode if proc.returncode is not None else -1,
             duration_ms=duration_ms,
+        )
+
+    async def _run(self, *args: str) -> CommandResult:
+        result = await self._run_bytes(*args)
+        return CommandResult(
+            stdout=result.stdout.decode("utf-8", errors="replace"),
+            stderr=result.stderr,
+            exit_code=result.exit_code,
+            duration_ms=result.duration_ms,
         )
 
     async def list_devices(self) -> list[DeviceInfo]:
@@ -81,6 +95,9 @@ class SubprocessBackend:
 
     async def shell(self, serial: str, command: str) -> CommandResult:
         return await self._run("-s", serial, "shell", command)
+
+    async def exec_out(self, serial: str, command: str) -> ExecOutResult:
+        return await self._run_bytes("-s", serial, "exec-out", command)
 
     async def install(self, serial: str, apk_path: str, flags: list[str]) -> CommandResult:
         return await self._run("-s", serial, "install", *flags, apk_path)

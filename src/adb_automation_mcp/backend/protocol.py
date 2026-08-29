@@ -22,6 +22,19 @@ class CommandResult:
 
 
 @dataclass(frozen=True)
+class ExecOutResult:
+    """The result of running one `adb exec-out` command: like CommandResult, but
+    stdout is raw bytes (not decoded), since exec-out is used for binary output
+    such as `screencap -p`. stderr is still text.
+    """
+
+    stdout: bytes
+    stderr: str
+    exit_code: int
+    duration_ms: float
+
+
+@dataclass(frozen=True)
 class DeviceInfo:
     """One entry from `adb devices -l`: a connected device's identity and state."""
 
@@ -44,6 +57,8 @@ class AdbBackend(Protocol):
     async def list_devices(self) -> list[DeviceInfo]: ...
 
     async def shell(self, serial: str, command: str) -> CommandResult: ...
+
+    async def exec_out(self, serial: str, command: str) -> ExecOutResult: ...
 
     async def install(self, serial: str, apk_path: str, flags: list[str]) -> CommandResult: ...
 

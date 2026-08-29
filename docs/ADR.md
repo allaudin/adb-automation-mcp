@@ -548,6 +548,59 @@ device's API level, if a real need appears.
 
 ---
 
+## ADR-020: Binary `exec_out` Primitive; `take_screenshot` Returns Image Content
+
+**Status:** Accepted — extends ADR-001 / ADR-011 / ADR-014
+
+**Context:** `take_screenshot` originally wrote the PNG to a device-side temp file,
+`adb pull`-ed it to a host file under `ADB_AUTOMATION_LOCAL_ROOT`, and returned only
+the host path. ADR-001's six primitives all carry `stdout` as `str`, so binary
+command output had no seam — the file+pull dance was the documented workaround.
+For an MCP server this is the wrong shape: the point of a screenshot tool is that the
+model/host can *see* the image, and MCP has a first-class image content block for
+exactly that. The bytes never reaching the client defeated the purpose.
+
+**Decision:** Add a seventh `AdbBackend` primitive, `exec_out(serial, command) ->
+ExecOutResult`, mapping to `adb exec-out <command>`. `ExecOutResult` mirrors
+`CommandResult` but `stdout` is raw `bytes`. `adb exec-out` is chosen over `adb
+shell` (which can apply PTY CRLF translation that corrupts a raw PNG) and over
+`screencap`+`pull` (no device temp file, no `adb pull`, no host write, one
+round-trip). `SubprocessBackend` grows a `_run_bytes` helper that skips the stdout
+decode; `_run` now decodes its result. `FakeBackend` returns a real 77-byte 2×2 PNG
+fixture.
+
+`ScreenService.take_screenshot(serial, display_id=None)` now runs `screencap -p` via
+`exec_out`, validates the PNG signature (empty/garbage output → `BackendError`
+rather than an empty image), and returns `TakeScreenshotResult` carrying the raw
+bytes in an `image_bytes` field that is `Field(exclude=True)` — excluded from the
+structured envelope. A new transparent marker decorator `@image_content` (sibling of
+`@category`) flags the tool; on success `wrap_with_envelope` *additionally* emits an
+MCP image content block (`fastmcp` `Image` → `ImageContent`) built from
+`image_bytes`/`mime_type`, returning a `ToolResult(content=[block],
+structured_content=<the usual ToolResponse envelope>)`. Errors are enveloped exactly
+as before. This is the **one documented exception** to ADR-011's "every tool returns
+a bare `ToolResponse`".
+
+`take_screenshot` loses its `local_path` parameter and no longer consults
+`ADB_AUTOMATION_LOCAL_ROOT`; `pull_file` and `stop_log_session` still do. This
+supersedes the host-file half of the screen module's original design and follows
+ADR-016's precedent for growing the Protocol with its own ADR.
+
+**Consequences:** Breaking change — clients calling `take_screenshot` with
+`local_path` must drop it and read the image content block instead. Verified live
+against a real emulator (`emulator-5554`): a normal capture round-trips a valid
+1080×2400 PNG through the full MCP path; an unknown serial surfaces as
+`DEVICE_NOT_FOUND` — note `adb exec-out` reports this differently from `adb shell`
+("`error: device '<serial>' not found`", exit 255, vs "`adb: device ...`", exit 1),
+so the classifier matches both wordings; and an invalid `display_id` makes `screencap`
+print an error to **stdout while still exiting 0**, which the PNG-signature guard
+catches as `BACKEND_ERROR` (with screencap's message attached). `exec_out` still has
+no Layer 2 contract-test coverage (that layer is unimplemented). The generic
+`ExecOutResult` seam is reusable for any future binary-output tool (`screenrecord`
+pull, `bugreportz`, etc.).
+
+---
+
 ## Deferred / Open Questions
 
 Decisions deliberately not made yet, with the condition that would trigger revisiting

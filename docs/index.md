@@ -45,10 +45,10 @@ ADB_AUTOMATION_BACKEND=fake uv run adb-automation-mcp
 ### Where saved files go (`ADB_AUTOMATION_LOCAL_ROOT`)
 
 A few tools save a file to this machine when you ask them to: `pull_file` (copies a
-file off the device), `take_screenshot` (saves a PNG of the screen), and
-`stop_log_session` (saves a captured log). `ADB_AUTOMATION_LOCAL_ROOT` is the one folder
-each of those tools is allowed to write into — there's no fallback location, so all
-three refuse to run until it's set.
+file off the device) and `stop_log_session` (saves a captured log).
+`ADB_AUTOMATION_LOCAL_ROOT` is the one folder each of those tools is allowed to write
+into — there's no fallback location, so both refuse to run until it's set.
+(`take_screenshot` does *not* write a file — it returns the PNG bytes directly.)
 
 Each tool's `local_path` argument is a path *inside* that folder. With
 `ADB_AUTOMATION_LOCAL_ROOT=/home/you/adb-downloads` set:

@@ -37,11 +37,13 @@ async def get_property(ctx: Context, serial: str, name: str) -> Property:
         Propagates the same way most tools do (unlike check_adb_available): if
         the adb binary itself can't be found or is unresponsive, or the
         serial doesn't match a connected device, that surfaces as an actual
-        tool error. `getprop` itself can't distinguish "property exists and
-        is set to an empty string" from "property doesn't exist at all" — both
-        produce identical empty output, exit code 0 — so this tool returns an
-        empty value as ordinary success data in both cases rather than
-        guessing which one happened or raising an error.
+        tool error. An empty `name` raises INVALID_ARGUMENT — a bare `getprop`
+        dumps every property, never what a single-property lookup meant.
+        `getprop` itself can't distinguish "property exists and is set to an
+        empty string" from "property doesn't exist at all" — both produce
+        identical empty output, exit code 0 — so this tool returns an empty
+        value as ordinary success data in both cases rather than guessing
+        which one happened or raising an error.
 
     Example:
         Called with serial="emulator-5554", name="ro.build.version.release".
@@ -134,7 +136,8 @@ async def get_property_metadata(ctx: Context, serial: str, name: str) -> Propert
         Propagates the same way most tools do (unlike check_adb_available): if
         the adb binary itself can't be found or is unresponsive, or the
         serial doesn't match a connected device, that surfaces as an actual
-        tool error. If the SELinux-context lookup specifically isn't
+        tool error. An empty `name` raises INVALID_ARGUMENT. If the
+        SELinux-context lookup specifically isn't
         supported on this device/Android version (rather than the device
         being unreachable), that's not treated as an internal failure — this
         tool falls back to selinux_context=None, declared_type=None and still

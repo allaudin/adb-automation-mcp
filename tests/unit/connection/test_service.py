@@ -8,7 +8,11 @@ import pytest
 
 from adb_automation_mcp.backend.protocol import CommandResult
 from adb_automation_mcp.backend.testing import FakeBackend
-from adb_automation_mcp.errors import AdbUnavailableError, DeviceNotFoundError
+from adb_automation_mcp.errors import (
+    AdbUnavailableError,
+    DeviceNotFoundError,
+    InvalidArgumentError,
+)
 from adb_automation_mcp.modules.connection.service import (
     AdbServerRestartResult,
     ConnectionService,
@@ -283,3 +287,45 @@ def test_restart_adbd_as_root_result_summary_includes_output_on_rejection() -> N
     ).summary()
     assert "cannot run as root" in summary
     assert "production builds" in summary
+
+
+@pytest.mark.asyncio
+async def test_connect__out_of_range_port_raises_invalid_argument() -> None:
+    calls: list[tuple[str, int]] = []
+
+    class RecordingBackend(FakeBackend):
+        async def connect(self, host: str, port: int) -> CommandResult:
+            calls.append((host, port))
+            return await super().connect(host, port)
+
+    service = ConnectionService(RecordingBackend())
+
+    for bad_port in (0, 99999, -1):
+        with pytest.raises(InvalidArgumentError):
+            await service.connect("127.0.0.1", bad_port)
+    assert calls == []  # rejected before any adb connect
+
+
+@pytest.mark.asyncio
+async def test_connect__empty_host_raises_invalid_argument() -> None:
+    service = ConnectionService(FakeBackend())
+
+    with pytest.raises(InvalidArgumentError):
+        await service.connect("   ", 5555)
+
+
+@pytest.mark.asyncio
+async def test_disconnect__out_of_range_port_raises_invalid_argument() -> None:
+    service = ConnectionService(FakeBackend())
+
+    with pytest.raises(InvalidArgumentError):
+        await service.disconnect("127.0.0.1", 70000)
+
+
+@pytest.mark.asyncio
+async def test_connect__valid_port_boundaries_are_accepted() -> None:
+    service = ConnectionService(FakeBackend())
+
+    for ok_port in (1, 5555, 65535):
+        result = await service.connect("127.0.0.1", ok_port)
+        assert result.address == f"127.0.0.1:{ok_port}"

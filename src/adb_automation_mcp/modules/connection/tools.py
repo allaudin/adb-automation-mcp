@@ -76,8 +76,9 @@ async def connect_device(ctx: Context, host: str, port: int = 5555) -> ConnectRe
 
     Args:
         host: Hostname or IP address of the device's adb-over-TCP listener.
-        port: TCP port adb is listening on. Defaults to 5555, the port `adb
-            tcpip` uses when none is given.
+            Must not be empty.
+        port: TCP port adb is listening on, 1-65535. Defaults to 5555, the
+            port `adb tcpip` uses when none is given.
 
     Returns:
         Whether adb reported the connection as successful, the "host:port"
@@ -90,7 +91,9 @@ async def connect_device(ctx: Context, host: str, port: int = 5555) -> ConnectRe
     Error handling:
         Propagates the same way most tools do (unlike check_adb_available): if
         the adb binary itself can't be found or is unresponsive, that surfaces
-        as an actual tool error.
+        as an actual tool error. An empty host or an out-of-range port raises
+        INVALID_ARGUMENT before any adb call. A reachable-but-refused host is
+        not an error — it comes back as success with data.success=false.
 
     Example:
         Called with host="192.168.1.50". A typical response:
@@ -121,9 +124,10 @@ async def disconnect_device(ctx: Context, host: str, port: int = 5555) -> Discon
     instead of leaving it dangling.
 
     Args:
-        host: Hostname or IP address of the device to disconnect.
-        port: TCP port it's connected on. Defaults to 5555, matching
-            connect_device's default.
+        host: Hostname or IP address of the device to disconnect. Must not
+            be empty.
+        port: TCP port it's connected on, 1-65535. Defaults to 5555,
+            matching connect_device's default.
 
     Returns:
         Whether adb reported the disconnect as successful, the "host:port"
@@ -135,7 +139,10 @@ async def disconnect_device(ctx: Context, host: str, port: int = 5555) -> Discon
     Error handling:
         Propagates the same way most tools do (unlike check_adb_available): if
         the adb binary itself can't be found or is unresponsive, that surfaces
-        as an actual tool error.
+        as an actual tool error. An empty host or an out-of-range port raises
+        INVALID_ARGUMENT before any adb call. An address that simply isn't
+        connected is not an error — it comes back as success with
+        data.success=false.
 
     Example:
         Called with host="192.168.1.50". A typical response:

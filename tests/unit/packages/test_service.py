@@ -441,15 +441,33 @@ async def test_uninstall_package__nonexistent_user_raises_user_not_found() -> No
 
 @pytest.mark.asyncio
 async def test_uninstall_package__version_mismatch_raises_android_rejection() -> None:
+    # Captured live: a --versionCode that doesn't match the installed package
+    # produces a bare "Failure [DELETE_FAILED_INTERNAL_ERROR]", exit 1. With a
+    # version_code in play that is an on-device rejection, not "not found".
     backend = FakeBackend(
         pm_uninstall_result=CommandResult(
-            stdout="Failure [VERSION_CODE_MISMATCH]\n", stderr="", exit_code=1, duration_ms=50.0
+            stdout="Failure [DELETE_FAILED_INTERNAL_ERROR]\n", stderr="", exit_code=1, duration_ms=50.0
         )
     )
     service = PackagesService(backend)
 
     with pytest.raises(AndroidRejectionError):
         await service.uninstall_package("emulator-5554", "com.example.app", version_code=99)
+
+
+@pytest.mark.asyncio
+async def test_uninstall_package__internal_error_without_version_code_is_package_not_found() -> None:
+    # Same bare internal-error reason, but no version_code: nothing matched to
+    # remove -> PACKAGE_NOT_FOUND (unchanged behaviour).
+    backend = FakeBackend(
+        pm_uninstall_result=CommandResult(
+            stdout="Failure [DELETE_FAILED_INTERNAL_ERROR]\n", stderr="", exit_code=1, duration_ms=50.0
+        )
+    )
+    service = PackagesService(backend)
+
+    with pytest.raises(PackageNotFoundError):
+        await service.uninstall_package("emulator-5554", "com.example.app")
 
 
 @pytest.mark.asyncio

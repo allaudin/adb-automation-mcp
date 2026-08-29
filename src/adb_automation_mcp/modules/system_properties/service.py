@@ -26,6 +26,7 @@ from adb_automation_mcp.backend.protocol import AdbBackend, CommandResult
 from adb_automation_mcp.errors import (
     BackendError,
     DeviceNotFoundError,
+    InvalidArgumentError,
     PolicyViolationError,
     PropertyWriteRejectedError,
 )
@@ -126,6 +127,14 @@ def _parse_property_list(output: str) -> list[tuple[str, str]]:
     return entries
 
 
+def _require_property_name(serial: str, name: str) -> None:
+    # A blank name would run a bare `getprop`, which dumps every property (or,
+    # with -Z, nothing) — never what the caller of a single-property lookup
+    # meant. Rejected up front, same as install_apk/tap validate their scalars.
+    if not name.strip():
+        raise InvalidArgumentError("name must not be empty.", details={"serial": serial})
+
+
 def _is_prohibited_property(name: str) -> bool:
     if name in _PROHIBITED_PROPERTY_NAMES:
         return True
@@ -151,6 +160,7 @@ class SystemPropertiesService:
         raise BackendError(message, details={"serial": serial, "exit_code": result.exit_code})
 
     async def get_property(self, serial: str, name: str) -> Property:
+        _require_property_name(serial, name)
         result = await self._backend.shell(serial, f"getprop {shlex.quote(name)}")
         self._raise_for_shell_failure(serial, result)
         return Property(serial=serial, name=name, value=result.stdout.strip())
@@ -165,6 +175,7 @@ class SystemPropertiesService:
         return PropertyList(serial=serial, prefix=prefix, properties=properties)
 
     async def get_property_metadata(self, serial: str, name: str) -> PropertyMetadata:
+        _require_property_name(serial, name)
         value_result = await self._backend.shell(serial, f"getprop {shlex.quote(name)}")
         self._raise_for_shell_failure(serial, value_result)
         value = value_result.stdout.strip()

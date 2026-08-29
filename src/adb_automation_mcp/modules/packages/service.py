@@ -260,7 +260,7 @@ class PackagesService:
         parts.append(shlex.quote(package_name))
 
         result = await self._backend.shell(serial, " ".join(parts))
-        _raise_for_uninstall_failure(serial, package_name, user_id, result)
+        _raise_for_uninstall_failure(serial, package_name, user_id, version_code, result)
         return UninstallResult(
             serial=serial,
             package_name=package_name,
@@ -344,7 +344,11 @@ def _raise_for_install_failure(serial: str, apk_path: str, result: CommandResult
 
 
 def _raise_for_uninstall_failure(
-    serial: str, package_name: str, user_id: int | None, result: CommandResult
+    serial: str,
+    package_name: str,
+    user_id: int | None,
+    version_code: int | None,
+    result: CommandResult,
 ) -> None:
     message = (result.stderr or result.stdout).strip() or "adb shell command exited non-zero."
     if _is_device_not_found(message):
@@ -359,12 +363,29 @@ def _raise_for_uninstall_failure(
     match = _FAILURE_REASON_RE.search(combined)
     if match is not None:
         reason = match.group("reason").strip()
+        internal_error = "DELETE_FAILED_INTERNAL_ERROR" in reason
+        # A --versionCode that doesn't match the installed package can't be
+        # satisfied: pm reports a bare "Failure [DELETE_FAILED_INTERNAL_ERROR]"
+        # (verified live). The package IS installed, just not at that version,
+        # so this is an on-device rejection, not "package not found".
+        if internal_error and version_code is not None:
+            raise AndroidRejectionError(
+                f"pm uninstall could not satisfy --versionCode {version_code} for "
+                f"{package_name}: {reason}",
+                details={
+                    "serial": serial,
+                    "package_name": package_name,
+                    "user_id": user_id,
+                    "version_code": version_code,
+                    "reason": reason,
+                },
+            )
         # pm uninstall reports both "package was never installed" and
         # "package isn't installed for the targeted user" as a Failure
         # whose reason names the scope ("not installed for <id>") or a
         # generic internal-error code — either way, nothing matched to
         # remove.
-        if "not installed" in reason.lower() or "DELETE_FAILED_INTERNAL_ERROR" in reason:
+        if "not installed" in reason.lower() or internal_error:
             raise PackageNotFoundError(
                 f"pm uninstall could not find {package_name}: {reason}",
                 details={"serial": serial, "package_name": package_name, "user_id": user_id},

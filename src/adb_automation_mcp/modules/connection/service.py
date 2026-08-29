@@ -9,7 +9,7 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from adb_automation_mcp.backend.protocol import AdbBackend
-from adb_automation_mcp.errors import BackendError, DeviceNotFoundError
+from adb_automation_mcp.errors import BackendError, DeviceNotFoundError, InvalidArgumentError
 
 
 class AdbServerRestartResult(BaseModel):
@@ -106,6 +106,19 @@ class RestartAdbdAsRootResult(BaseModel):
         return f"adbd cannot run as root on {self.serial}: {self.output or 'unknown reason'}"
 
 
+def _require_host_port(host: str, port: int) -> None:
+    # adb itself rejects a bad host:port (empty host, "bad port number '99999'")
+    # but only after a round trip, and connect/disconnect surface that as
+    # data.success=False rather than an error. Reject the obviously-invalid
+    # cases up front instead, as INVALID_ARGUMENT.
+    if not host.strip():
+        raise InvalidArgumentError("host must not be empty.", details={"host": host, "port": port})
+    if not 1 <= port <= 65535:
+        raise InvalidArgumentError(
+            "port must be between 1 and 65535.", details={"host": host, "port": port}
+        )
+
+
 class ConnectionService:
     """Operations that change how this host's adb reaches a device: the local
     adb server's own lifecycle and its connections (global, non-device-scoped
@@ -124,6 +137,7 @@ class ConnectionService:
         return AdbServerRestartResult(success=start_result.exit_code == 0, output=output)
 
     async def connect(self, host: str, port: int) -> ConnectResult:
+        _require_host_port(host, port)
         address = f"{host}:{port}"
         result = await self._backend.connect(host, port)
         output = (result.stdout + result.stderr).strip()
@@ -134,6 +148,7 @@ class ConnectionService:
         return ConnectResult(success=success, address=address, output=output)
 
     async def disconnect(self, host: str, port: int) -> DisconnectResult:
+        _require_host_port(host, port)
         address = f"{host}:{port}"
         result = await self._backend.disconnect(host, port)
         output = (result.stdout + result.stderr).strip()

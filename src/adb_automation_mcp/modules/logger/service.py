@@ -182,6 +182,18 @@ def _parse_epoch_anchor(output: str) -> str | None:
     return None
 
 
+def _require_positive_max_lines(serial: str, max_lines: int) -> None:
+    # `logcat -t 0` is a silent no-op (returns a tiny snapshot, not "0 lines");
+    # negatives are rejected by logcat itself as a BACKEND_ERROR. Reject <1 up
+    # front so the contract is "the N most recent lines, N >= 1", consistent
+    # with how install_apk/tap validate their scalar arguments.
+    if max_lines < 1:
+        raise InvalidArgumentError(
+            "max_lines must be a positive integer.",
+            details={"serial": serial, "max_lines": max_lines},
+        )
+
+
 class LoggerService:
     """Reads and manages Android log buffers on a connected device."""
 
@@ -237,6 +249,7 @@ class LoggerService:
         tag: str | None = None,
         pid: int | None = None,
     ) -> LogDump:
+        _require_positive_max_lines(serial, max_lines)
         parts = ["logcat", "-d", "-v", "threadtime", "-t", str(max_lines), "-b", buffer]
         if pid is not None:
             parts.append(f"--pid={pid}")
@@ -286,6 +299,7 @@ class LoggerService:
         max_lines: int = 200,
         min_priority: LogPriority | None = None,
     ) -> PackageLogDump:
+        _require_positive_max_lines(serial, max_lines)
         pid = await self._resolve_package_pid(serial, package)
         parts = ["logcat", "-d", "-v", "threadtime", "-t", str(max_lines), "-b", buffer, f"--pid={pid}"]
         parts.extend(self._build_filterspec(min_priority, None))

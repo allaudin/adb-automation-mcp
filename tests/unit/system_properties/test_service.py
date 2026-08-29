@@ -12,6 +12,7 @@ from adb_automation_mcp.errors import (
     AdbUnavailableError,
     BackendError,
     DeviceNotFoundError,
+    InvalidArgumentError,
     PolicyViolationError,
     PropertyWriteRejectedError,
 )
@@ -378,3 +379,27 @@ def test_set_property_result_summary_mentions_name_value_and_serial() -> None:
     assert "debug.x" in summary
     assert "y" in summary
     assert "emulator-5554" in summary
+
+
+@pytest.mark.asyncio
+async def test_get_property__empty_name_raises_invalid_argument() -> None:
+    calls: list[str] = []
+
+    class RecordingBackend(FakeBackend):
+        async def shell(self, serial: str, command: str) -> CommandResult:
+            calls.append(command)
+            return await super().shell(serial, command)
+
+    service = SystemPropertiesService(RecordingBackend())
+
+    with pytest.raises(InvalidArgumentError):
+        await service.get_property("emulator-5554", "   ")
+    assert calls == []  # rejected before any getprop
+
+
+@pytest.mark.asyncio
+async def test_get_property_metadata__empty_name_raises_invalid_argument() -> None:
+    service = SystemPropertiesService(FakeBackend())
+
+    with pytest.raises(InvalidArgumentError):
+        await service.get_property_metadata("emulator-5554", "")

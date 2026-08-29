@@ -46,8 +46,8 @@ async def read_logs(
             either can legitimately fail on a given device.
         max_lines: How many of the most recent raw lines to read, before any
             tag/priority filter is applied (see Error handling below for why
-            that ordering matters). 0 is silently clamped to 1; negative
-            values are a real error.
+            that ordering matters). Must be a positive integer — 0 or
+            negative raises INVALID_ARGUMENT.
         min_priority: Minimum priority to include ("V" < "D" < "I" < "W" <
             "E" < "F" < "S"=silent). None means no filter (everything).
         tag: If set, show only this tag (at min_priority or above) and
@@ -64,11 +64,12 @@ async def read_logs(
         Propagates the same way most tools do (unlike check_adb_available): if
         the adb binary itself can't be found or is unresponsive, or the
         serial doesn't match a connected device, that surfaces as an actual
-        tool error. Verified live that max_lines truncates the RAW buffer
-        first, then filters — a narrow tag/priority filter combined with a
-        small max_lines can come back with empty output (data, not an error)
-        even though matching lines exist further back in the buffer; increase
-        max_lines if that happens.
+        tool error. A max_lines below 1 raises INVALID_ARGUMENT. Verified
+        live that max_lines truncates the RAW buffer first, then filters — a
+        narrow tag/priority filter combined with a small max_lines can come
+        back with empty output (data, not an error) even though matching
+        lines exist further back in the buffer; increase max_lines if that
+        happens.
 
     Example:
         Called with serial="emulator-5554", buffer="main", max_lines=3. A
@@ -197,7 +198,8 @@ async def read_package_logs(
         buffer: Which ring buffer to read.
         max_lines: How many of the most recent raw lines to read before any
             priority filter and the pid filter are applied. Same
-            truncate-then-filter ordering caveat as read_logs.
+            truncate-then-filter ordering caveat as read_logs. Must be a
+            positive integer — 0 or negative raises INVALID_ARGUMENT.
         min_priority: Minimum priority to include. None means no filter.
 
     Returns:

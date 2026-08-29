@@ -264,12 +264,17 @@ async def install_existing_for_user(
     Error handling:
         Raises DeviceNotFoundError if serial doesn't match a connected
         device. Raises PackageNotFoundError when package_name isn't
-        installed on the device at all. Raises UserNotFoundError when
-        user_id doesn't correspond to an Android user on the device.
-        Raises AndroidRejectionError for any other on-device Package
-        Manager rejection. Raises InvalidArgumentError for an empty
-        package_name or a negative user_id. Any other non-zero exit
-        surfaces as BackendError.
+        installed on the device at all. Raises AndroidRejectionError for
+        any other on-device Package Manager rejection. Raises
+        InvalidArgumentError for an empty package_name or a negative
+        user_id. Any other non-zero exit surfaces as BackendError.
+
+        Note: `pm install-existing` does NOT validate the target user —
+        verified live that a non-existent user_id (e.g. 42 on a
+        single-user device) still returns "Package <name> installed for
+        user: 42" and exit 0. This tool reports that as success; it cannot
+        surface a bogus user_id as an error because pm itself doesn't.
+        Use list_users first if the id must be known-good.
 
     Example:
         Called with serial="emulator-5554",

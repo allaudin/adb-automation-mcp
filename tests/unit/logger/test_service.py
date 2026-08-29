@@ -671,3 +671,28 @@ def test_log_session_result_summary_mentions_name_line_count_and_path() -> None:
     assert "42" in summary
     assert "wifi_repro" in summary
     assert "/tmp/session1.log" in summary
+
+
+@pytest.mark.asyncio
+async def test_read_logs__max_lines_below_one_raises_invalid_argument() -> None:
+    calls: list[str] = []
+
+    class RecordingBackend(FakeBackend):
+        async def shell(self, serial: str, command: str) -> CommandResult:
+            calls.append(command)
+            return await super().shell(serial, command)
+
+    service = LoggerService(RecordingBackend())
+
+    for bad in (0, -5):
+        with pytest.raises(InvalidArgumentError):
+            await service.read_logs("emulator-5554", max_lines=bad)
+    assert calls == []  # rejected before any logcat call
+
+
+@pytest.mark.asyncio
+async def test_read_package_logs__max_lines_below_one_raises_invalid_argument() -> None:
+    service = LoggerService(FakeBackend())
+
+    with pytest.raises(InvalidArgumentError):
+        await service.read_package_logs("emulator-5554", "com.android.systemui", max_lines=0)

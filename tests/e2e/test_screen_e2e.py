@@ -7,15 +7,42 @@ concurrent edits to a shared test file.
 from __future__ import annotations
 
 import base64
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any
 
 import pytest
-from fastmcp import Client
+from fastmcp import Client, FastMCP
 
 from adb_automation_mcp.backend.protocol import ExecOutResult
 from adb_automation_mcp.backend.testing import FakeBackend
+from adb_automation_mcp.modules.screen.service import ScreenService
+from adb_automation_mcp.policy import PolicyConfig, PolicyEngine
+from adb_automation_mcp.registry import Registry, discover_modules
 from tests.e2e.test_protocol_e2e import _build_test_server
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+def _build_test_server_with_local_root(backend: FakeBackend, local_root: Path | None) -> FastMCP:
+    # take_screenshot's save= needs a configured local_root, which the shared
+    # _build_test_server helper doesn't parameterize — build the server the same
+    # way but construct the screen service directly with local_root instead of
+    # reading ADB_AUTOMATION_LOCAL_ROOT from the environment.
+    manifests = discover_modules()
+    registry = Registry(policy=PolicyEngine(PolicyConfig()))
+
+    @asynccontextmanager
+    async def lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
+        services = registry.build_services(backend, manifests)
+        services["screen"] = ScreenService(backend, local_root=local_root)
+        yield {"backend": backend, "services": services}
+
+    mcp = FastMCP("test-server", lifespan=lifespan)
+    registry.register_tools(mcp, manifests)
+    registry.register_resources(mcp, manifests)
+    return mcp
 
 
 @pytest.mark.asyncio
@@ -96,3 +123,37 @@ async def test_take_screenshot_tool_unknown_serial_returns_device_not_found_erro
     assert result.data.status == "error"
     assert result.data.error is not None
     assert result.data.error.code == "DEVICE_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_take_screenshot_tool_save_writes_file_and_returns_image_block(tmp_path: Path) -> None:
+    mcp = _build_test_server_with_local_root(FakeBackend(), tmp_path)
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "take_screenshot", {"serial": "emulator-5554", "save": True, "filename": "e2e"}
+        )
+
+    image_blocks = [c for c in result.content if getattr(c, "type", None) == "image"]
+    assert len(image_blocks) == 1
+
+    saved = tmp_path / "screenshots" / "e2e.png"
+    assert result.data.status == "success"
+    assert result.data.data.local_path == str(saved)
+    assert saved.read_bytes() == base64.b64decode(image_blocks[0].data)
+    assert saved.read_bytes().startswith(_PNG_SIGNATURE)
+
+
+@pytest.mark.asyncio
+async def test_take_screenshot_tool_save_without_local_root_returns_policy_denied(tmp_path: Path) -> None:
+    mcp = _build_test_server_with_local_root(FakeBackend(), None)
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "take_screenshot", {"serial": "emulator-5554", "save": True}
+        )
+
+    assert result.data.status == "error"
+    assert result.data.error is not None
+    assert result.data.error.code == "POLICY_DENIED"
+    assert not any(getattr(c, "type", None) == "image" for c in result.content)

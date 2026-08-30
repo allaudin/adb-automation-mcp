@@ -1,0 +1,115 @@
+site_name: adb-automation-mcp
+site_description: MCP server exposing Android Debug Bridge (ADB) capabilities as typed, documented tools and resources.
+site_url: https://allaudin.github.io/adb-automation-mcp/
+repo_url: https://github.com/allaudin/adb-automation-mcp
+repo_name: allaudin/adb-automation-mcp
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+site_dir: site
+
+# mkdocstrings pulls tool docstrings straight from src/ (see the Tool
+# Reference nav below) — without this, `mkdocs serve`'s live-reload only
+# watches docs_dir/mkdocs.yml and silently keeps serving stale docstring
+# content after a .py file changes, since git isn't otherwise involved.
+watch:
+  - src
+
+# Internal-only file, not part of the public site.
+exclude_docs: |
+  ADR.md
+
+extra_css:
+  - assets/extra.css
+extra_javascript:
+  - assets/extra.js
+
+nav:
+  - Home: index.md
+  - Architecture: ARCHITECTURE.md
+  - Tool Reference:
+      - diagnostics: reference/diagnostics.md
+      - device_info: reference/device_info.md
+      - connection: reference/connection.md
+      - user: reference/user.md
+      - logger: reference/logger.md
+      - system_properties: reference/system_properties.md
+      - packages: reference/packages.md
+      - activities: reference/activities.md
+      - app_data: reference/app_data.md
+      - android_services: reference/android_services.md
+      - broadcasts: reference/broadcasts.md
+      - date_time: reference/date_time.md
+      - displays: reference/displays.md
+      - files: reference/files.md
+      - network: reference/network.md
+      - permissions: reference/permissions.md
+      - power: reference/power.md
+      - processes: reference/processes.md
+      - screen: reference/screen.md
+      - settings: reference/settings.md
+      - input: reference/input.md
+      - ui: reference/ui.md
+  - Integrations:
+      - Claude Code: integrations/claude-code.md
+      - AI-Assisted Install: integrations/ai-assisted-install.md
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.top
+    - content.code.copy
+    - content.action.edit
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      # Required for Material to render ```mermaid fences as actual diagrams
+      # instead of plain code blocks — ARCHITECTURE.md has 7 of them.
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: true
+            show_root_heading: true
+            docstring_style: google
+            merge_init_into_class: true
+            show_signature_annotations: true
+            docstring_options:
+              # This project's docstrings are deliberately narrative
+              # prose, tuned for LLM/human readability — not griffe's stricter
+              # "ExceptionType: description" structured Raises/Returns items.
+              # Suppress griffe's parsing warnings rather than reshaping the
+              # docstring convention around one tool's parser.
+              warnings: false
+              # Every tool here returns exactly one value, documented as a
+              # single flush-left paragraph (no hanging indent). Without this,
+              # griffe treats each physical line of that paragraph as a
+              # separate "Returns" item, rendering as one bogus table row per
+              # line instead of one row for the whole description.
+              returns_multiple_items: false

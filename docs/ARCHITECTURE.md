@@ -274,12 +274,10 @@ four-key shape:
 
 Backend and module code never construct this directly — they return data or raise a
 typed `AdbError` subclass, and a single wrapper at the registry boundary
-(`wrap_with_envelope`) converts whichever happened into the envelope.
-
-One tool deviates: `take_screenshot` is marked `@image_content`, so on success the
-wrapper *also* emits an MCP image content block built from the result's raw bytes
-(the envelope still rides along as `structuredContent`). Errors are enveloped
-exactly like every other tool. See ADR-020.
+(`wrap_with_envelope`) converts whichever happened into the envelope. No tool
+deviates from this — `take_screenshot` saves a PNG to `local_root` and returns its
+path in the ordinary envelope (ADR-022; an `@image_content` carve-out briefly
+existed under ADR-020 and was reverted).
 
 ## 5. How They Work Together — A Tool Call
 

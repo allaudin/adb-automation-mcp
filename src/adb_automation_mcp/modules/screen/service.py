@@ -1,15 +1,13 @@
 """Domain logic for the screen module: capturing the device's current screen
-as a PNG and returning the raw image bytes.
+as a PNG, saving it to this server's host, and returning the saved path.
 
-Uses `adb exec-out screencap -p` (the `exec_out` backend primitive): exec-out
-streams the command's stdout as raw bytes with no PTY/CRLF translation, so the
-PNG comes back intact in one round-trip — no device-side temp file, no
-`adb pull`. The registry wraps the returned `image_bytes` into an MCP image
-content block for the client.
-
-Optionally (`save=True`) the PNG is *also* written to
-`<ADB_AUTOMATION_LOCAL_ROOT>/screenshots/` — the same host-filesystem gate
-`pull_file`/`stop_log_session` use. The inline image block is returned either way.
+Captures with `adb exec-out screencap -p` (the `exec_out` backend primitive):
+exec-out streams the command's stdout as raw bytes with no PTY/CRLF
+translation, so the PNG comes back intact in one round-trip — no device-side
+temp file, no `adb pull`. The bytes are written to
+`<ADB_AUTOMATION_LOCAL_ROOT>/screenshots/`, the same host-filesystem gate
+`pull_file`/`stop_log_session` use, and the tool returns the absolute path
+(plus width/height/size) so the caller knows where the file is.
 """
 
 from __future__ import annotations
@@ -19,7 +17,7 @@ import struct
 from datetime import datetime, timezone
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from adb_automation_mcp.backend.protocol import AdbBackend, ExecOutResult
 from adb_automation_mcp.errors import (
@@ -38,36 +36,31 @@ _SCREENSHOT_SUBDIR = "screenshots"
 
 
 class TakeScreenshotResult(BaseModel):
-    """Outcome of capturing a device screenshot (`adb exec-out screencap -p`).
+    """Outcome of capturing a device screenshot and saving it to the host.
 
-    The raw PNG is carried in `image_bytes` for the registry to emit as an MCP
-    image content block; that field is excluded from the structured envelope
-    (the bytes are delivered as the image block, not duplicated as JSON).
-    width/height/size_bytes are best-effort metadata read from the PNG header —
-    width/height are None if the bytes somehow aren't a parseable PNG (a
-    BACKEND_ERROR is raised before that happens in the normal path). local_path
-    is the host path the PNG was also written to when save=True, else None. Only
-    ever returned on success; see ScreenService.take_screenshot's Error handling.
+    local_path is the absolute path the PNG was written to — that is the point
+    of the tool: the caller reads the file from there. width/height are
+    best-effort metadata read from the PNG header (None only if the bytes
+    somehow aren't a parseable PNG — a BACKEND_ERROR is raised before that in
+    the normal path); size_bytes is the file size. Only ever returned on
+    success; see ScreenService.take_screenshot's Error handling.
     """
 
     serial: str
     display_id: int | None
-    mime_type: str = "image/png"
+    local_path: str
     width: int | None
     height: int | None
     size_bytes: int
     success: bool
-    local_path: str | None = None
-    image_bytes: bytes = Field(exclude=True, repr=False)
 
     def summary(self) -> str:
         dims = f"{self.width}x{self.height} " if self.width and self.height else ""
-        base = f"Captured {dims}screenshot from {self.serial}."
-        return f"{base} Saved to {self.local_path}." if self.local_path else base
+        return f"Saved {dims}screenshot from {self.serial} to {self.local_path}."
 
 
 class ScreenService:
-    """Captures the device's current screen and returns the PNG bytes."""
+    """Captures the device's current screen and saves it to this server's host."""
 
     def __init__(self, backend: AdbBackend, local_root: Path | None = None) -> None:
         self._backend = backend
@@ -92,7 +85,6 @@ class ScreenService:
         self,
         serial: str,
         display_id: int | None = None,
-        save: bool = False,
         filename: str | None = None,
     ) -> TakeScreenshotResult:
         parts = ["screencap", "-p"]
@@ -115,23 +107,19 @@ class ScreenService:
 
         width, height = _read_png_dimensions(png)
 
-        local_path: str | None = None
-        if save:
-            name = _screenshot_filename(serial, filename)
-            target = self._resolve_local_path(f"{_SCREENSHOT_SUBDIR}/{name}")
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(png)
-            local_path = str(target)
+        name = _screenshot_filename(serial, filename)
+        target = self._resolve_local_path(f"{_SCREENSHOT_SUBDIR}/{name}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(png)
 
         return TakeScreenshotResult(
             serial=serial,
             display_id=display_id,
+            local_path=str(target),
             width=width,
             height=height,
             size_bytes=len(png),
             success=True,
-            local_path=local_path,
-            image_bytes=png,
         )
 
 

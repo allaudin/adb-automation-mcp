@@ -633,6 +633,44 @@ optional params) — no version-major implications, unlike ADR-020 itself.
 
 ---
 
+## ADR-022: `take_screenshot` Saves a File and Returns Its Path
+
+**Status:** Accepted — supersedes ADR-020's "returns image content" decision and
+folds in ADR-021; ADR-020's `exec_out` primitive decision stands
+
+**Context:** ADR-020 made `take_screenshot` return the PNG inline as an MCP image
+content block, via the one `@image_content` carve-out in `wrap_with_envelope`
+(ADR-011's only documented exception). In practice this is the wrong shape for how
+the tool is used: a multi-megabyte base64 blob in the tool result bloats the model's
+context on every call, most MCP hosts don't render it usefully anyway, and what
+callers actually want is a file on disk they can reference by path (to attach to a
+bug, diff across a run, hand to another tool). ADR-021 then bolted an opt-in `save=`
+onto the side of that, leaving two ways to get the same bytes.
+
+**Decision:** `take_screenshot` now *only* saves. It captures with `exec_out`
+(unchanged — ADR-020's primitive is genuinely better than the old
+screencap-to-tmpfile + `adb pull` dance and stays), writes the PNG to
+`<ADB_AUTOMATION_LOCAL_ROOT>/screenshots/` unconditionally, and returns an ordinary
+`ToolResponse[TakeScreenshotResult]` whose `data.local_path` is the absolute path it
+wrote (plus `width`/`height`/`size_bytes`). The `save` parameter, the `image_bytes`
+and `mime_type` result fields, the `@image_content` marker decorator, and the
+`returns_image` branch in `wrap_with_envelope` are all removed — so **every** tool is
+a bare `ToolResponse` again, with no ADR-011 exception. `filename` (optional bare
+name, `.png` enforced, path separators rejected as `INVALID_ARGUMENT`) is kept.
+`ADB_AUTOMATION_LOCAL_ROOT` is now *required* for `take_screenshot` (was opt-in under
+ADR-021): unset → `POLICY_DENIED`, same as `pull_file`.
+
+**Consequences:** Breaking — a caller reading the image content block must switch to
+reading `data.local_path` and loading the file itself; a server that never set
+`ADB_AUTOMATION_LOCAL_ROOT` now gets `POLICY_DENIED` from this tool where ADR-020's
+version would have returned bytes. This ships as a major version bump. Verified live
+against a connected emulator (`emulator-5554`): a normal call writes a valid
+1080×2400 PNG under `screenshots/` and returns its absolute path; `filename=`,
+`INVALID_ARGUMENT` on a path-separator name, `DEVICE_NOT_FOUND` on an unknown serial,
+and `POLICY_DENIED` with no `local_root` all behave as documented.
+
+---
+
 ## Deferred / Open Questions
 
 Decisions deliberately not made yet, with the condition that would trigger revisiting

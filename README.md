@@ -70,8 +70,8 @@ in-memory backend, not something a real client config needs):
 - `ADB_AUTOMATION_ALLOW_DESTRUCTIVE=1` — allow `destructive`-category tools (e.g.
   `remove_user`); denied by default
 - `ADB_AUTOMATION_LOCAL_ROOT` — the folder on this machine where file-saving tools
-  (`pull_file`, `stop_log_session`, and `take_screenshot` with `save=true`) are
-  allowed to write; unset means those tools refuse to write anywhere
+  (`pull_file`, `stop_log_session`, `take_screenshot`) are allowed to write; unset
+  means those tools refuse to write anywhere
 
 ## Testing
 

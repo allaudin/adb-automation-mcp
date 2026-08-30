@@ -46,7 +46,7 @@ Useful env vars (see `server.py` header and ADR-010):
 - `ADB_AUTOMATION_ALLOW_DESTRUCTIVE=1` — flip default policy posture to also allow
   `destructive`-category tools
 - `ADB_AUTOMATION_LOCAL_ROOT` — the folder on this machine where file-saving tools
-  (`pull_file`, `take_screenshot`, `stop_log_session`) are allowed to write; no
+  (`pull_file`, `stop_log_session`, `take_screenshot`) are allowed to write; no
   default, those tools refuse to run until this is set
 
 ## Architecture (essentials — see `../docs/ARCHITECTURE.md` for the full picture)
@@ -74,10 +74,8 @@ Useful env vars (see `server.py` header and ADR-010):
   (`status`/`message`/`data`/`error`) — always `isError: false` at the MCP level; a
   domain failure is `status: "error"` in the payload, not a protocol-level error.
   Module/service code raises typed `AdbError` subclasses; only the registry wrapper
-  builds the envelope. One documented exception (ADR-020): a tool marked
-  `@image_content` (currently only `take_screenshot`) also gets an MCP image content
-  block on success, built from its result's `image_bytes`; its errors still envelope
-  normally.
+  builds the envelope. No exceptions — every tool returns a bare `ToolResponse`
+  (ADR-022 reverted the one `@image_content` carve-out that briefly existed).
 - **Policy**: category default posture (`destructive` denied unless
   `ADB_AUTOMATION_ALLOW_DESTRUCTIVE=1`) plus explicit allow/deny lists by tool name,
   evaluated once at registration time. `local_root` (host filesystem writes) is a

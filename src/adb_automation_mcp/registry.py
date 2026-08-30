@@ -17,8 +17,6 @@ from importlib.metadata import entry_points
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, get_type_hints
 
 from fastmcp.exceptions import ResourceError
-from fastmcp.tools import ToolResult
-from fastmcp.utilities.types import Image
 
 from adb_automation_mcp.errors import AdbError
 from adb_automation_mcp.policy import Category, PolicyEngine
@@ -47,22 +45,6 @@ def category(value: Category) -> Callable[[F], F]:
         return fn
 
     return decorator
-
-
-def image_content(fn: F) -> F:
-    """Transparent marker decorator (like `category`): flags a tool whose result
-    carries a raw image to be returned to the client as an MCP image content
-    block, not just as structured JSON.
-
-    The tool still returns a normal result model and still gets the standard
-    ToolResponse envelope as `structured_content`; the marker only tells
-    `wrap_with_envelope` to *additionally* emit an image block built from the
-    result's `image_bytes` + `mime_type` fields. Errors are enveloped exactly
-    like any other tool. This is the one documented exception to "every tool
-    returns a bare ToolResponse" (ADR-011).
-    """
-    fn.__adb_image_content__ = True  # type: ignore[attr-defined]
-    return fn
 
 
 @dataclass(frozen=True)
@@ -104,25 +86,13 @@ def wrap_with_envelope(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Await
     hints = get_type_hints(fn, include_extras=True)
     data_type = hints["return"]
     response_cls = ToolResponse[data_type]  # type: ignore[valid-type]
-    returns_image = getattr(fn, "__adb_image_content__", False)
 
     @functools.wraps(fn)
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
         try:
             data = await fn(*args, **kwargs)
             message = data.summary() if hasattr(data, "summary") else f"{fn.__name__} completed successfully."
-            envelope = response_cls(status="success", message=message, data=data, error=None)
-            if returns_image:
-                # ADR-011 carve-out: also hand the client a real MCP image block,
-                # built from the result's raw bytes — the envelope still rides
-                # along as structured_content (image_bytes is excluded from it).
-                block = Image(
-                    data=data.image_bytes, format=data.mime_type.split("/")[-1]
-                ).to_image_content()
-                return ToolResult(
-                    content=[block], structured_content=envelope.model_dump(mode="json")
-                )
-            return envelope
+            return response_cls(status="success", message=message, data=data, error=None)
         except AdbError as exc:
             logger.info("tool %s returned a domain error: %s", fn.__name__, exc)
             return response_cls(

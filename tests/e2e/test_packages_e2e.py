@@ -442,3 +442,95 @@ async def test_get_package_info_tool_is_registered() -> None:
         names = {tool.name for tool in await client.list_tools()}
 
     assert "get_package_info" in names
+
+
+# --- set_package_enabled_state ----------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_set_package_enabled_state_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "set_package_enabled_state",
+            {
+                "serial": "emulator-5554",
+                "package_name": "com.example.app",
+                "state": "disabled_user",
+            },
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.requested_state == "disabled_user"
+    assert result.data.data.new_state == "disabled_user"
+    assert result.data.data.target == "com.example.app"
+
+
+@pytest.mark.asyncio
+async def test_set_package_enabled_state_tool_component_target_serializes() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "set_package_enabled_state",
+            {
+                "serial": "emulator-5554",
+                "package_name": "com.example.app",
+                "state": "enabled",
+                "component": ".MyReceiver",
+            },
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.component == ".MyReceiver"
+    assert result.data.data.target == "com.example.app/.MyReceiver"
+
+
+@pytest.mark.asyncio
+async def test_set_package_enabled_state_tool_security_exception_is_permission_denied() -> None:
+    mcp = _build_test_server(
+        FakeBackend(
+            pm_set_enabled_result=CommandResult(
+                stdout=(
+                    "\nException occurred while executing 'disable':\n"
+                    "java.lang.SecurityException: Shell cannot change component state for null to 2\n"
+                ),
+                stderr="",
+                exit_code=255,
+                duration_ms=8.0,
+            )
+        )
+    )
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "set_package_enabled_state",
+            {"serial": "emulator-5554", "package_name": "com.android.systemui", "state": "disabled"},
+        )
+
+    assert result.data.status == "error"
+    assert result.data.error is not None
+    assert result.data.error.code == "PERMISSION_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_set_package_enabled_state_tool_rejects_unknown_state_via_schema() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        with pytest.raises(Exception):  # noqa: B017 - fastmcp raises on schema violation
+            await client.call_tool(
+                "set_package_enabled_state",
+                {"serial": "emulator-5554", "package_name": "com.example.app", "state": "banana"},
+            )
+
+
+@pytest.mark.asyncio
+async def test_set_package_enabled_state_tool_is_registered() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        names = {tool.name for tool in await client.list_tools()}
+
+    assert "set_package_enabled_state" in names

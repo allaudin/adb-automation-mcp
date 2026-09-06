@@ -24,10 +24,23 @@ from adb_automation_mcp.errors import (
     DeviceNotFoundError,
     InvalidArgumentError,
     PackageNotFoundError,
+    PermissionDeniedError,
     UserNotFoundError,
 )
 
 PackageFilter = Literal["system", "third_party"]
+
+# The four component-enabled states this tool exposes, mapped to their `pm`
+# subcommands. "default" clears any override (pm calls this `default-state`, or
+# `default` on older builds).
+PackageEnabledState = Literal["enabled", "disabled", "disabled_user", "default"]
+
+_ENABLED_STATE_TO_PM_SUBCMD: dict[str, str] = {
+    "enabled": "enable",
+    "disabled": "disable",
+    "disabled_user": "disable-user",
+    "default": "default-state",
+}
 
 
 class PackageList(BaseModel):
@@ -218,6 +231,33 @@ class PackageInfo(BaseModel):
             f"{len(self.requested_permissions)} requested permissions, "
             f"{len(self.users)} user(s)."
         )
+
+
+class PackageEnabledStateResult(BaseModel):
+    """Outcome of `pm enable|disable|disable-user|default-state` for a package or
+    one of its components.
+
+    `pm` confirms the change with a single "Package <target> new state: <state>"
+    line; new_state is parsed from it (normalized to the same enum values as the
+    request: disabled-user → "disabled_user"). It's None only if pm exited 0 but
+    printed no recognizable confirmation line. prior_state isn't reported — pm
+    doesn't return it, and reading it back reliably (especially per-component) is
+    not worth an extra round trip.
+    """
+
+    serial: str
+    package_name: str
+    component: str | None
+    target: str
+    user_id: int | None
+    requested_state: PackageEnabledState
+    new_state: str | None
+    success: bool
+
+    def summary(self) -> str:
+        scope = f" for user {self.user_id}" if self.user_id is not None else ""
+        got = self.new_state or self.requested_state
+        return f"{self.target} on {self.serial}{scope} is now '{got}'."
 
 
 class PackagesService:
@@ -437,6 +477,62 @@ class PackagesService:
 
         return _parse_dumpsys_package(serial, package_name, text)
 
+    async def set_package_enabled_state(
+        self,
+        serial: str,
+        package_name: str,
+        state: PackageEnabledState,
+        component: str | None = None,
+        user_id: int | None = None,
+    ) -> PackageEnabledStateResult:
+        if not package_name.strip():
+            raise InvalidArgumentError("package_name must not be empty.", details={"serial": serial})
+        if state not in _ENABLED_STATE_TO_PM_SUBCMD:
+            raise InvalidArgumentError(
+                f"Unknown enabled state {state!r}.",
+                details={"serial": serial, "valid": sorted(_ENABLED_STATE_TO_PM_SUBCMD)},
+            )
+        if user_id is not None and user_id < 0:
+            raise InvalidArgumentError(
+                "user_id must be a non-negative integer.",
+                details={"serial": serial, "user_id": user_id},
+            )
+        if component is not None:
+            component = component.strip()
+            if not component or any(c.isspace() for c in component) or "/" in component:
+                raise InvalidArgumentError(
+                    "component must be a single class name (e.g. '.MyReceiver' or "
+                    "'com.pkg.MyReceiver'), with no spaces or '/'.",
+                    details={"serial": serial, "component": component},
+                )
+
+        target = f"{package_name}/{component}" if component else package_name
+        subcmd = _ENABLED_STATE_TO_PM_SUBCMD[state]
+        user_part = f"--user {user_id} " if user_id is not None else ""
+
+        result = await self._backend.shell(serial, f"pm {subcmd} {user_part}{shlex.quote(target)}")
+        # Older builds call the "default" subcommand `default` rather than
+        # `default-state`; retry once on that specific mismatch.
+        if (
+            state == "default"
+            and result.exit_code != 0
+            and "Unknown command: default-state" in (result.stdout + result.stderr)
+        ):
+            result = await self._backend.shell(serial, f"pm default {user_part}{shlex.quote(target)}")
+
+        _raise_for_set_enabled_failure(serial, target, component, result)
+
+        return PackageEnabledStateResult(
+            serial=serial,
+            package_name=package_name,
+            component=component,
+            target=target,
+            user_id=user_id,
+            requested_state=state,
+            new_state=_parse_new_enabled_state(result.stdout),
+            success=True,
+        )
+
 
 def _parse_pm_path(output: str) -> list[str]:
     paths: list[str] = []
@@ -653,6 +749,70 @@ def _safe_int(value: str | None) -> int | None:
         return int(value)
     except ValueError:
         return None
+
+
+_NEW_STATE_RE = re.compile(r"new state:\s*(?P<state>[\w-]+)")
+
+
+def _parse_new_enabled_state(stdout: str) -> str | None:
+    m = _NEW_STATE_RE.search(stdout)
+    if m is None:
+        return None
+    # Normalize pm's hyphenated wording to the request enum's underscores.
+    return m.group("state").strip().replace("-", "_")
+
+
+def _raise_for_set_enabled_failure(
+    serial: str, target: str, component: str | None, result: CommandResult
+) -> None:
+    if result.exit_code == 0:
+        return
+    combined = f"{result.stdout}\n{result.stderr}"
+    message = (result.stderr or result.stdout).strip() or "pm set-enabled exited non-zero."
+    if _is_device_not_found(message):
+        raise DeviceNotFoundError(message, details={"serial": serial})
+    if "Unknown package" in combined:
+        raise PackageNotFoundError(
+            f"pm has no record of {target}: {_first_exception_line(combined)}",
+            details={"serial": serial, "target": target},
+        )
+    if _MISSING_USER_RE.search(combined) is not None:
+        raise UserNotFoundError(
+            _first_exception_line(combined), details={"serial": serial, "target": target}
+        )
+    if "SecurityException" in combined or "cannot change component state" in combined:
+        # pm reports "protected package" and "component the shell can't touch"
+        # (including a genuinely absent component) with the same
+        # SecurityException — it doesn't distinguish them.
+        raise PermissionDeniedError(
+            f"the shell is not allowed to change the enabled state of {target}: "
+            f"{_first_exception_line(combined)}",
+            details={"serial": serial, "target": target, "component": component},
+        )
+    if "Unknown command:" in combined:
+        raise BackendError(
+            f"this device's pm does not support that enabled-state subcommand: "
+            f"{_first_exception_line(combined)}",
+            details={"serial": serial, "target": target},
+        )
+    raise BackendError(
+        message, details={"serial": serial, "target": target, "exit_code": result.exit_code}
+    )
+
+
+def _first_exception_line(text: str) -> str:
+    """pm's failures are a Java stack trace; the useful part is the
+    "java.lang.SomeException: message" line, not the frames below it.
+    """
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("java.") and ":" in line:
+            return line
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line and not line.startswith("at ") and "Exception occurred" not in line:
+            return line
+    return text.strip().splitlines()[0] if text.strip() else "no detail"
 
 
 def _parse_package_list(output: str) -> list[str]:

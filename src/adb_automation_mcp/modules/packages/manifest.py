@@ -12,6 +12,7 @@ from adb_automation_mcp.modules.packages.tools import (
     install_apk,
     install_existing_for_user,
     list_packages,
+    set_package_enabled_state,
     uninstall_package,
 )
 from adb_automation_mcp.registry import ModuleManifest
@@ -26,6 +27,7 @@ MODULE = ModuleManifest(
         install_existing_for_user,
         get_package_path,
         get_package_info,
+        set_package_enabled_state,
     ],
     resources=[],
 )

@@ -38,6 +38,32 @@ def _echo_resolved_tcp_port(endpoint: str) -> CommandResult:
     )
 
 
+_PM_ENABLED_STATE_WORDS = {
+    "enable": "enabled",
+    "disable": "disabled",
+    "disable-user": "disabled-user",
+    "disable-until-used": "disabled-until-used",
+    "default-state": "default",
+    "default": "default",
+}
+
+
+def _synthesize_pm_set_enabled(command: str) -> CommandResult:
+    """Mirror live `pm enable|disable|disable-user|default-state ... TARGET`:
+    a single "Package <target> new state: <state>" line, exit 0.
+    """
+    tokens = command.split()
+    subcmd = tokens[1] if len(tokens) > 1 else ""
+    target = tokens[-1] if tokens else ""
+    state = _PM_ENABLED_STATE_WORDS.get(subcmd, "default")
+    return CommandResult(
+        stdout=f"Package {target} new state: {state}\n",
+        stderr="",
+        exit_code=0,
+        duration_ms=70.0,
+    )
+
+
 class FakeBackend:
     """AdbBackend implementation backed by in-memory fixtures instead of a real
     device or adb install — deterministic, fast, and usable in any environment.
@@ -83,6 +109,7 @@ class FakeBackend:
         list_packages_result: CommandResult | None = None,
         pm_path_result: CommandResult | None = None,
         dumpsys_package_result: CommandResult | None = None,
+        pm_set_enabled_result: CommandResult | None = None,
         install_result: CommandResult | None = None,
         pm_uninstall_result: CommandResult | None = None,
         pm_install_existing_result: CommandResult | None = None,
@@ -448,6 +475,14 @@ class FakeBackend:
             exit_code=0,
             duration_ms=120.0,
         )
+        # `adb shell pm enable|disable|disable-user|default-state [--user N] TARGET`
+        # — on success prints a single "Package <target> new state: <state>" line
+        # (verified live on a car AVD: `enabled`, `disabled-user`, `default`).
+        # None (the default) means "synthesize that line from whatever subcommand
+        # + target shell() is actually called with" — see shell() below. A fixed
+        # override simulates a failure (SecurityException stack trace, "Unknown
+        # package", etc.).
+        self._pm_set_enabled_result = pm_set_enabled_result
         # `adb install [flags] apk_path` — the well-documented, long-stable
         # "Performing Streamed Install" / "Success" wording modern adb uses
         # for a normal install. Not captured from a live device in this
@@ -799,6 +834,12 @@ class FakeBackend:
             return self._pm_path_result
         if command.startswith("dumpsys package "):
             return self._dumpsys_package_result
+        if command.startswith(
+            ("pm enable ", "pm disable ", "pm disable-user ", "pm default-state ", "pm default ")
+        ):
+            if self._pm_set_enabled_result is not None:
+                return self._pm_set_enabled_result
+            return _synthesize_pm_set_enabled(command)
         if command.startswith("pm uninstall"):
             return self._pm_uninstall_result
         if command.startswith("pm install-existing --user "):

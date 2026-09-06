@@ -16,7 +16,11 @@ from adb_automation_mcp.errors import (
     InvalidArgumentError,
     PermissionDeniedError,
 )
-from adb_automation_mcp.modules.activities.service import ActivitiesService, ResolvedActivity
+from adb_automation_mcp.modules.activities.service import (
+    ActivitiesService,
+    ForegroundActivitySnapshot,
+    ResolvedActivity,
+)
 
 
 @pytest.mark.asyncio
@@ -411,3 +415,195 @@ def test_resolved_activity_summary_variants() -> None:
     ).summary()
     assert "com.x/.Y" in s
     assert "(default)" in s
+
+
+# --- get_foreground_activity ---------------------------------------------------
+
+
+_SINGLE_DISPLAY_DUMP = (
+    "ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)\n"
+    "Display #0 (activities from top to bottom):\n"
+    "  * Task{a #1 type=home U=0}\n"
+    "    * Task{b #1000004 type=home A=1010050:com.android.car.carlauncher U=10}\n"
+    "      topResumedActivity=ActivityRecord{138464275 u10 "
+    "com.android.car.carlauncher/.CarLauncher t1000004}\n"
+    "\n"
+    "  ResumedActivity: ActivityRecord{138464275 u10 "
+    "com.android.car.carlauncher/.CarLauncher t1000004}\n"
+    "\n"
+    "ActivityTaskSupervisor state:\n"
+    "  mFocusedApp=ActivityRecord{138464275 u10 "
+    "com.android.car.carlauncher/.CarLauncher t1000004}\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_get_foreground_activity__constructs_command_and_parses_default_fixture() -> None:
+    backend = _ShellRecordingBackend()
+    service = ActivitiesService(backend)
+
+    snap = await service.get_foreground_activity("emulator-5554")
+
+    assert backend.last_shell_command == "dumpsys activity activities"
+    assert isinstance(snap, ForegroundActivitySnapshot)
+    assert snap.resolved is True
+    assert snap.component == "com.android.car.carlauncher/.CarLauncher"
+    assert snap.package_name == "com.android.car.carlauncher"
+    assert snap.activity_class == ".CarLauncher"
+    assert snap.user_id == 10
+    assert snap.display_id == 0
+    assert snap.task_id == 1000004
+    assert len(snap.per_display) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_foreground_activity__multi_display_lists_each_and_picks_focused_primary() -> None:
+    dump = _SINGLE_DISPLAY_DUMP + (
+        "Display #2 (activities from top to bottom):\n"
+        "  * Task{x #9 type=standard U=0}\n"
+        "      topResumedActivity=ActivityRecord{abc123 u0 com.example.two/.SecondActivity t2002}\n"
+    )
+    backend = FakeBackend(
+        dumpsys_activity_activities_result=CommandResult(
+            stdout=dump, stderr="", exit_code=0, duration_ms=5.0
+        )
+    )
+    service = ActivitiesService(backend)
+
+    snap = await service.get_foreground_activity("emulator-5554")
+
+    assert [(d.display_id, d.component) for d in snap.per_display] == [
+        (0, "com.android.car.carlauncher/.CarLauncher"),
+        (2, "com.example.two/.SecondActivity"),
+    ]
+    # primary comes from ResumedActivity: / mFocusedApp (display 0).
+    assert snap.component == "com.android.car.carlauncher/.CarLauncher"
+    assert snap.display_id == 0
+
+
+@pytest.mark.asyncio
+async def test_get_foreground_activity__no_resumed_app_is_resolved_false_not_error() -> None:
+    backend = FakeBackend(
+        dumpsys_activity_activities_result=CommandResult(
+            stdout=(
+                "ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)\n"
+                "Display #0 (activities from top to bottom):\n"
+                "  (nothing resumed)\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=5.0,
+        )
+    )
+    service = ActivitiesService(backend)
+
+    snap = await service.get_foreground_activity("emulator-5554")
+
+    assert snap.resolved is False
+    assert snap.component is None
+    assert snap.per_display == []
+
+
+@pytest.mark.asyncio
+async def test_get_foreground_activity__falls_back_to_per_display_when_no_root_markers() -> None:
+    backend = FakeBackend(
+        dumpsys_activity_activities_result=CommandResult(
+            stdout=(
+                "Display #0 (activities from top to bottom):\n"
+                "      topResumedActivity=ActivityRecord{aa u0 com.x/.Main t5}\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=5.0,
+        )
+    )
+    service = ActivitiesService(backend)
+
+    snap = await service.get_foreground_activity("emulator-5554")
+
+    assert snap.resolved is True
+    assert snap.component == "com.x/.Main"
+    assert snap.display_id == 0
+    assert snap.task_id == 5
+
+
+@pytest.mark.asyncio
+async def test_get_foreground_activity__topResumedActivity_null_is_skipped() -> None:
+    backend = FakeBackend(
+        dumpsys_activity_activities_result=CommandResult(
+            stdout=(
+                "Display #0 (activities from top to bottom):\n"
+                "      topResumedActivity=null\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=5.0,
+        )
+    )
+    service = ActivitiesService(backend)
+
+    snap = await service.get_foreground_activity("emulator-5554")
+
+    assert snap.resolved is False
+
+
+@pytest.mark.asyncio
+async def test_get_foreground_activity__unknown_serial_raises_device_not_found() -> None:
+    backend = FakeBackend(
+        dumpsys_activity_activities_result=CommandResult(
+            stdout="", stderr="adb: device 'bogus' not found\n", exit_code=1, duration_ms=5.0
+        )
+    )
+    service = ActivitiesService(backend)
+
+    with pytest.raises(DeviceNotFoundError):
+        await service.get_foreground_activity("bogus")
+
+
+@pytest.mark.asyncio
+async def test_get_foreground_activity__nonzero_exit_raises_backend_error() -> None:
+    backend = FakeBackend(
+        dumpsys_activity_activities_result=CommandResult(
+            stdout="", stderr="Can't find service: activity\n", exit_code=1, duration_ms=5.0
+        )
+    )
+    service = ActivitiesService(backend)
+
+    with pytest.raises(BackendError):
+        await service.get_foreground_activity("emulator-5554")
+
+
+@pytest.mark.asyncio
+async def test_get_foreground_activity__adb_unavailable_propagates() -> None:
+    service = ActivitiesService(FakeBackend(unavailable=True))
+
+    with pytest.raises(AdbUnavailableError):
+        await service.get_foreground_activity("emulator-5554")
+
+
+@pytest.mark.asyncio
+async def test_get_foreground_activity__garbage_output_parses_to_resolved_false() -> None:
+    backend = FakeBackend(
+        dumpsys_activity_activities_result=CommandResult(
+            stdout="totally unrecognizable\n", stderr="", exit_code=0, duration_ms=5.0
+        )
+    )
+    service = ActivitiesService(backend)
+
+    snap = await service.get_foreground_activity("emulator-5554")
+
+    assert snap.resolved is False
+
+
+def test_foreground_activity_summary_variants() -> None:
+    assert "No activity is currently resumed" in ForegroundActivitySnapshot(
+        serial="emulator-5554",
+        resolved=False,
+        component=None,
+        package_name=None,
+        activity_class=None,
+        user_id=None,
+        display_id=None,
+        task_id=None,
+        per_display=[],
+    ).summary()

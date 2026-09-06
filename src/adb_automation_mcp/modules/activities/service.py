@@ -92,13 +92,66 @@ class ResolvedActivity(BaseModel):
         return f"{self.component} resolves that intent on {self.serial}{default}."
 
 
+class DisplayForegroundActivity(BaseModel):
+    """The resumed/top Activity on one display."""
+
+    display_id: int
+    component: str
+    package_name: str
+    activity_class: str
+    user_id: int | None
+    task_id: int | None
+
+
+class ForegroundActivitySnapshot(BaseModel):
+    """The currently resumed/top Activity, parsed from `dumpsys activity
+    activities`.
+
+    resolved is False when nothing is resumed anywhere (e.g. the screen is off
+    or every app is stopped) — a valid state, not an error. When resolved, the
+    top-level component/package_name/activity_class/user_id/display_id/task_id
+    describe the single globally-focused Activity, and per_display lists the
+    resumed Activity of every display that has one (length > 1 only on a
+    multi-display device).
+    """
+
+    serial: str
+    resolved: bool
+    component: str | None
+    package_name: str | None
+    activity_class: str | None
+    user_id: int | None
+    display_id: int | None
+    task_id: int | None
+    per_display: list[DisplayForegroundActivity]
+
+    def summary(self) -> str:
+        if not self.resolved:
+            return f"No activity is currently resumed on {self.serial}."
+        extra = f" (+{len(self.per_display) - 1} more display)" if len(self.per_display) > 1 else ""
+        return f"{self.component} is foreground on {self.serial}{extra}."
+
+
 class ActivitiesService:
-    """Launches Android activities on a connected device, and resolves intents
-    to activities without launching.
+    """Launches Android activities on a connected device, resolves intents to
+    activities without launching, and reports the foreground Activity.
     """
 
     def __init__(self, backend: AdbBackend) -> None:
         self._backend = backend
+
+    async def get_foreground_activity(self, serial: str) -> ForegroundActivitySnapshot:
+        result = await self._backend.shell(serial, "dumpsys activity activities")
+        if result.exit_code != 0:
+            message = (
+                result.stderr or result.stdout
+            ).strip() or "dumpsys activity activities exited non-zero."
+            if message.startswith("adb:") and "not found" in message:
+                raise DeviceNotFoundError(message, details={"serial": serial})
+            raise BackendError(
+                message, details={"serial": serial, "exit_code": result.exit_code}
+            )
+        return _parse_foreground_activity(serial, result.stdout)
 
     async def resolve_activity(
         self,
@@ -244,6 +297,132 @@ def _parse_start_activity_result(
 
 _RESOLVE_COMPONENT_RE = re.compile(r"^\s*(?P<pkg>[\w.]+)/(?P<cls>[\w.$]+)\s*$", re.MULTILINE)
 _RESOLVE_META_RE = re.compile(r"(\w+)=(\S+)")
+
+# ActivityRecord{<hex> u<userId> <package>/<class> [t<taskId>]}
+_ACT_RECORD_RE = re.compile(
+    r"ActivityRecord\{[0-9a-f]+ u(?P<user>\d+) (?P<comp>[^\s}]+)(?: t(?P<task>\d+))?\}"
+)
+_DISPLAY_HEADER_RE = re.compile(r"^Display #(?P<id>\d+)\b")
+_TOP_RESUMED_RE = re.compile(r"(?:topResumedActivity|mResumedActivity|ResumedActivity)=")
+
+
+def _split_component(comp: str) -> tuple[str, str]:
+    pkg, _, cls = comp.partition("/")
+    return pkg, cls
+
+
+def _activity_from_line(line: str) -> tuple[str, str, str, int | None, int | None] | None:
+    """(component, package, class, user_id, task_id) from the first
+    ActivityRecord{...} on a line, or None.
+    """
+    m = _ACT_RECORD_RE.search(line)
+    if m is None:
+        return None
+    comp = m.group("comp")
+    pkg, cls = _split_component(comp)
+    if not pkg or not cls:
+        return None
+    user = int(m.group("user")) if m.group("user") is not None else None
+    task = int(m.group("task")) if m.group("task") is not None else None
+    return comp, pkg, cls, user, task
+
+
+def _parse_foreground_activity(serial: str, text: str) -> ForegroundActivitySnapshot:
+    per_display: dict[int, DisplayForegroundActivity] = {}
+    current_display: int | None = None
+    root_resumed: tuple[str, str, str, int | None, int | None] | None = None
+    focused_app: tuple[str, str, str, int | None, int | None] | None = None
+
+    for raw in text.splitlines():
+        header = _DISPLAY_HEADER_RE.match(raw)
+        if header is not None:
+            current_display = int(header.group("id"))
+            continue
+        if raw and not raw[0].isspace() and not raw.startswith("Display #"):
+            # a new top-level section — no longer inside a Display block
+            current_display = None
+
+        if "topResumedActivity=" in raw and "=null" not in raw and current_display is not None:
+            if current_display not in per_display:
+                parsed = _activity_from_line(raw)
+                if parsed is not None:
+                    comp, pkg, cls, user, task = parsed
+                    per_display[current_display] = DisplayForegroundActivity(
+                        display_id=current_display,
+                        component=comp,
+                        package_name=pkg,
+                        activity_class=cls,
+                        user_id=user,
+                        task_id=task,
+                    )
+        elif raw.lstrip().startswith(("ResumedActivity:", "mResumedActivity:")):
+            parsed = _activity_from_line(raw)
+            if parsed is not None:
+                root_resumed = parsed
+        elif "mFocusedApp=" in raw:
+            parsed = _activity_from_line(raw)
+            if parsed is not None:
+                focused_app = parsed
+
+    displays_sorted = [per_display[k] for k in sorted(per_display)]
+
+    primary = (
+        root_resumed
+        or focused_app
+        or (
+            (
+                per_display[0].component,
+                per_display[0].package_name,
+                per_display[0].activity_class,
+                per_display[0].user_id,
+                per_display[0].task_id,
+            )
+            if 0 in per_display
+            else None
+        )
+        or (
+            (
+                displays_sorted[0].component,
+                displays_sorted[0].package_name,
+                displays_sorted[0].activity_class,
+                displays_sorted[0].user_id,
+                displays_sorted[0].task_id,
+            )
+            if displays_sorted
+            else None
+        )
+    )
+
+    if primary is None:
+        return ForegroundActivitySnapshot(
+            serial=serial,
+            resolved=False,
+            component=None,
+            package_name=None,
+            activity_class=None,
+            user_id=None,
+            display_id=None,
+            task_id=None,
+            per_display=[],
+        )
+
+    comp, pkg, cls, user, task = primary
+    # Which display is the primary on? Match by component against per_display.
+    display_id = next(
+        (d.display_id for d in displays_sorted if d.component == comp),
+        displays_sorted[0].display_id if displays_sorted else None,
+    )
+    return ForegroundActivitySnapshot(
+        serial=serial,
+        resolved=True,
+        component=comp,
+        package_name=pkg,
+        activity_class=cls,
+        user_id=user,
+        display_id=display_id,
+        task_id=task,
+        per_display=displays_sorted,
+    )
 
 
 def _parse_resolve_activity(serial: str, result: CommandResult) -> ResolvedActivity:

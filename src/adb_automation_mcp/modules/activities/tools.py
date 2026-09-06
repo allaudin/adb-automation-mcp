@@ -12,6 +12,7 @@ from fastmcp import Context
 
 from adb_automation_mcp.modules.activities.service import (
     ActivitiesService,
+    ForegroundActivitySnapshot,
     ResolvedActivity,
     StartActivityResult,
 )
@@ -192,3 +193,63 @@ async def resolve_activity(
         package_name=package_name,
         user_id=user_id,
     )
+
+
+@category("read")
+async def get_foreground_activity(ctx: Context, serial: str) -> ForegroundActivitySnapshot:
+    """Report the currently resumed/top Activity: `adb shell dumpsys activity activities`.
+
+    The way to confirm what's actually in front after a start_activity (or a
+    tap, or a back press) — parses the resumed-activity markers out of dumpsys
+    instead of returning the raw dump.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+
+    Returns:
+        resolved (False when nothing is resumed anywhere — screen off, all apps
+        stopped — which is a valid answer, not an error), and when resolved:
+        component ("package/class"), package_name, activity_class, user_id,
+        display_id and task_id of the globally-focused Activity, plus
+        per_display — the resumed Activity of each display that has one (more
+        than one entry only on a multi-display device).
+
+    Error handling:
+        An unknown serial raises DEVICE_NOT_FOUND; an unreachable adb binary
+        raises ADB_UNAVAILABLE. Output whose format this build's dumpsys
+        doesn't match parses to resolved=false rather than raising.
+
+    Example:
+        Called with serial="emulator-5554". A typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "com.android.car.carlauncher/.CarLauncher is foreground on emulator-5554.",
+          "data": {
+            "serial": "emulator-5554",
+            "resolved": true,
+            "component": "com.android.car.carlauncher/.CarLauncher",
+            "package_name": "com.android.car.carlauncher",
+            "activity_class": ".CarLauncher",
+            "user_id": 10,
+            "display_id": 0,
+            "task_id": 1000004,
+            "per_display": [
+              {
+                "display_id": 0,
+                "component": "com.android.car.carlauncher/.CarLauncher",
+                "package_name": "com.android.car.carlauncher",
+                "activity_class": ".CarLauncher",
+                "user_id": 10,
+                "task_id": 1000004
+              }
+            ]
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    activities = cast(ActivitiesService, services["activities"])
+    return await activities.get_foreground_activity(serial)

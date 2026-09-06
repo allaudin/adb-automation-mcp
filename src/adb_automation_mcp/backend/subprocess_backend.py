@@ -6,7 +6,8 @@
 `install` is used by the packages module's install_apk (uninstall and
 install-existing-for-user go through `shell` instead — see packages/service.py for
 why). `exec_out` (raw-bytes stdout, via `adb exec-out`) is used by the screen module's
-take_screenshot. `forward` is used by the port_forwarding module's create_forward.
+take_screenshot. `forward`/`forward_list`/`forward_remove`/`reverse`/`reverse_list`/
+`reverse_remove` are used by the port_forwarding module.
 `uninstall` and `push` are implemented to the same standard but not yet
 used by any module; `pull` is used by files. None of these have automated
 contract-test coverage against the real binary yet — verified manually against a real
@@ -139,6 +140,26 @@ class SubprocessBackend:
     ) -> CommandResult:
         flags = ["--no-rebind"] if no_rebind else []
         return await self._run("-s", serial, "forward", *flags, local, remote)
+
+    async def forward_list(self) -> CommandResult:
+        # `adb forward --list` is server-global (all devices); the caller filters
+        # by serial in Python. `-s` is deliberately not passed — adb ignores it here.
+        return await self._run("forward", "--list")
+
+    async def forward_remove(self, serial: str, local: str) -> CommandResult:
+        return await self._run("-s", serial, "forward", "--remove", local)
+
+    async def reverse(
+        self, serial: str, remote: str, local: str, no_rebind: bool
+    ) -> CommandResult:
+        flags = ["--no-rebind"] if no_rebind else []
+        return await self._run("-s", serial, "reverse", *flags, remote, local)
+
+    async def reverse_list(self, serial: str) -> CommandResult:
+        return await self._run("-s", serial, "reverse", "--list")
+
+    async def reverse_remove(self, serial: str, remote: str) -> CommandResult:
+        return await self._run("-s", serial, "reverse", "--remove", remote)
 
     async def kill_server(self) -> CommandResult:
         return await self._run("kill-server")

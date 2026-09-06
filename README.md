@@ -84,7 +84,7 @@ uv run mkdocs build --strict   # docs site
 
 ## Tools
 
-**46 tools.** Full signatures, docstrings, and worked examples are in the
+**51 tools.** Full signatures, docstrings, and worked examples are in the
 [tool reference](https://allaudin.github.io/adb-automation-mcp/reference/diagnostics/).
 Tools marked † are `destructive` — not registered unless
 `ADB_AUTOMATION_ALLOW_DESTRUCTIVE=1`.
@@ -106,7 +106,7 @@ Tools marked † are `destructive` — not registered unless
 | `network` (1) | `list_network_interfaces` |
 | `packages` (4) | `list_packages`, `install_apk`, `uninstall_package`†, `install_existing_for_user` |
 | `permissions` (1) | `grant_permission` |
-| `port_forwarding` (1) | `create_forward` |
+| `port_forwarding` (6) | `create_forward`, `list_forwards`, `remove_forward`, `create_reverse`, `list_reverses`, `remove_reverse` |
 | `power` (1) | `get_power_state` |
 | `processes` (1) | `force_stop_app` |
 | `screen` (1) | `take_screenshot` |

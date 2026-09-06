@@ -97,3 +97,138 @@ async def test_create_forward_tool_is_registered() -> None:
         tools = await client.list_tools()
 
     assert "create_forward" in {tool.name for tool in tools}
+
+
+@pytest.mark.asyncio
+async def test_list_forwards_tool_round_trips_and_filters_by_serial() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("list_forwards", {"serial": "emulator-5554"})
+
+    assert result.data.status == "success"
+    assert result.data.data.serial == "emulator-5554"
+    assert result.data.data.forwards[0].local_spec == "tcp:6100"
+
+
+@pytest.mark.asyncio
+async def test_list_forwards_tool_no_serial_lists_all() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("list_forwards", {})
+
+    assert result.data.status == "success"
+    assert result.data.data.serial is None
+    assert len(result.data.data.forwards) == 2
+
+
+@pytest.mark.asyncio
+async def test_remove_forward_tool_missing_mapping_is_success_removed_false() -> None:
+    mcp = _build_test_server(
+        FakeBackend(
+            forward_remove_result=CommandResult(
+                stdout="",
+                stderr="adb: error: listener 'tcp:6100' not found\n",
+                exit_code=1,
+                duration_ms=3.0,
+            )
+        )
+    )
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "remove_forward", {"serial": "emulator-5554", "local_port": 6100}
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.removed is False
+
+
+@pytest.mark.asyncio
+async def test_create_reverse_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "create_reverse",
+            {"serial": "emulator-5554", "remote_port": 8080, "local_port": 7000},
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.remote_port == 8080
+    assert result.data.data.local_port == 7000
+    assert result.data.data.remote_spec == "tcp:8080"
+    assert result.data.data.local_spec == "tcp:7000"
+
+
+@pytest.mark.asyncio
+async def test_create_reverse_tool_conflict_serializes_as_structured_error() -> None:
+    mcp = _build_test_server(
+        FakeBackend(
+            reverse_result=CommandResult(
+                stdout="",
+                stderr="adb: error: cannot rebind existing socket\n",
+                exit_code=1,
+                duration_ms=3.0,
+            )
+        )
+    )
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "create_reverse",
+            {
+                "serial": "emulator-5554",
+                "remote_port": 8080,
+                "local_port": 7000,
+                "no_rebind": True,
+            },
+        )
+
+    assert result.data.status == "error"
+    assert result.data.error is not None
+    assert result.data.error.code == "PORT_FORWARD_CONFLICT"
+
+
+@pytest.mark.asyncio
+async def test_list_reverses_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("list_reverses", {"serial": "emulator-5554"})
+
+    assert result.data.status == "success"
+    assert result.data.data.serial == "emulator-5554"
+    assert result.data.data.reverses[0].remote_spec == "tcp:8080"
+    assert result.data.data.reverses[0].local_spec == "tcp:7000"
+
+
+@pytest.mark.asyncio
+async def test_remove_reverse_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "remove_reverse", {"serial": "emulator-5554", "remote_port": 8080}
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.removed is True
+
+
+@pytest.mark.asyncio
+async def test_all_port_forwarding_tools_registered() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        names = {tool.name for tool in await client.list_tools()}
+
+    assert {
+        "create_forward",
+        "list_forwards",
+        "remove_forward",
+        "create_reverse",
+        "list_reverses",
+        "remove_reverse",
+    } <= names

@@ -22,6 +22,22 @@ _FAKE_SCREENCAP_PNG = base64.b64decode(
 )
 
 
+def _echo_resolved_tcp_port(endpoint: str) -> CommandResult:
+    """Mirror live `adb forward` / `adb reverse`: echo the resolved tcp port
+    number on stdout. `tcp:0` → a deterministic stand-in for an adb-allocated
+    ephemeral port; a non-tcp endpoint → empty stdout.
+    """
+    if endpoint == "tcp:0":
+        resolved = "41000"
+    elif endpoint.startswith("tcp:"):
+        resolved = endpoint.split(":", 1)[1]
+    else:
+        resolved = ""
+    return CommandResult(
+        stdout=f"{resolved}\n" if resolved else "", stderr="", exit_code=0, duration_ms=30.0
+    )
+
+
 class FakeBackend:
     """AdbBackend implementation backed by in-memory fixtures instead of a real
     device or adb install — deterministic, fast, and usable in any environment.
@@ -74,6 +90,11 @@ class FakeBackend:
         force_stop_result: CommandResult | None = None,
         pull_result: CommandResult | None = None,
         forward_result: CommandResult | None = None,
+        forward_list_result: CommandResult | None = None,
+        forward_remove_result: CommandResult | None = None,
+        reverse_result: CommandResult | None = None,
+        reverse_list_result: CommandResult | None = None,
+        reverse_remove_result: CommandResult | None = None,
         clear_app_data_result: CommandResult | None = None,
         exec_out_result: ExecOutResult | None = None,
         input_tap_result: CommandResult | None = None,
@@ -428,6 +449,47 @@ class FakeBackend:
         # adb-allocated port for `tcp:0`. A fixed override simulates a failure
         # ("cannot rebind existing socket", "bad port number", etc.).
         self._forward_result = forward_result
+        # `adb forward --list` — one "<serial> <local> <remote>" line per active
+        # host→device forward, server-global. Captured live (car AVD), with a
+        # second row hand-shaped to a non-tcp endpoint kind so parsing of
+        # "multiple endpoint types" is exercised by default.
+        self._forward_list_result = forward_list_result or CommandResult(
+            stdout=(
+                "emulator-5554 tcp:6100 tcp:8080\n"
+                "emulator-5554 tcp:43177 localabstract:foo\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=25.0,
+        )
+        # `adb -s <serial> forward --remove <local>` — silent on success, exit 0
+        # (verified live). A missing listener is "adb: error: listener '<x>' not
+        # found", exit 1 — override this fixture to simulate that.
+        self._forward_remove_result = forward_remove_result or CommandResult(
+            stdout="", stderr="", exit_code=0, duration_ms=15.0
+        )
+        # None (the default) means "echo back the resolved remote port on stdout
+        # for whatever remote endpoint reverse() is called with" — see reverse()
+        # below, same convention as forward(). Verified live on the car AVD.
+        self._reverse_result = reverse_result
+        # `adb -s <serial> reverse --list` — one "<transport-token> <remote>
+        # <local>" line per active device→host reverse. Note column 0 is a
+        # "host-<N>" transport token, NOT the serial (verified live).
+        self._reverse_list_result = reverse_list_result or CommandResult(
+            stdout=(
+                "host-15 tcp:8080 tcp:7000\n"
+                "host-15 localabstract:bar tcp:7001\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=25.0,
+        )
+        # `adb -s <serial> reverse --remove <remote>` — silent on success, exit
+        # 0 (verified live). Missing listener → "adb: error: listener '<x>' not
+        # found", exit 1.
+        self._reverse_remove_result = reverse_remove_result or CommandResult(
+            stdout="", stderr="", exit_code=0, duration_ms=15.0
+        )
         # `adb shell pm clear` — PackageManagerShellCommand's documented,
         # long-stable success text: a bare "Success". Not captured from a
         # live device in this environment (none was available); same caveat
@@ -718,17 +780,31 @@ class FakeBackend:
         self._raise_if_unavailable()
         if self._forward_result is not None:
             return self._forward_result
-        # Mirror live `adb forward`: echo the resolved local port on stdout.
-        # `tcp:0` → a deterministic stand-in for an adb-allocated ephemeral port.
-        if local == "tcp:0":
-            resolved = "41000"
-        elif local.startswith("tcp:"):
-            resolved = local.split(":", 1)[1]
-        else:
-            resolved = ""
-        return CommandResult(
-            stdout=f"{resolved}\n" if resolved else "", stderr="", exit_code=0, duration_ms=30.0
-        )
+        return _echo_resolved_tcp_port(local)
+
+    async def forward_list(self) -> CommandResult:
+        self._raise_if_unavailable()
+        return self._forward_list_result
+
+    async def forward_remove(self, serial: str, local: str) -> CommandResult:
+        self._raise_if_unavailable()
+        return self._forward_remove_result
+
+    async def reverse(
+        self, serial: str, remote: str, local: str, no_rebind: bool
+    ) -> CommandResult:
+        self._raise_if_unavailable()
+        if self._reverse_result is not None:
+            return self._reverse_result
+        return _echo_resolved_tcp_port(remote)
+
+    async def reverse_list(self, serial: str) -> CommandResult:
+        self._raise_if_unavailable()
+        return self._reverse_list_result
+
+    async def reverse_remove(self, serial: str, remote: str) -> CommandResult:
+        self._raise_if_unavailable()
+        return self._reverse_remove_result
 
     async def pull(self, serial: str, remote_path: str, local_path: str) -> CommandResult:
         self._raise_if_unavailable()

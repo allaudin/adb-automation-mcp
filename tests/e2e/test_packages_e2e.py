@@ -383,3 +383,62 @@ async def test_get_package_path_tool_is_registered() -> None:
         names = {tool.name for tool in await client.list_tools()}
 
     assert "get_package_path" in names
+
+
+# --- get_package_info ------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_package_info_tool_round_trips_and_serializes_nested_shape() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "get_package_info",
+            {"serial": "emulator-5554", "package_name": "com.example.thirdparty"},
+        )
+
+    assert result.data.status == "success"
+    d = result.data.data
+    assert d.package_name == "com.example.thirdparty"
+    assert d.uid == 10234
+    assert d.version_name == "4.5.0"
+    assert d.is_system is False
+    assert d.users[0].user_id == 0
+    assert d.users[0].enabled_state == "enabled"
+    assert "android.permission.CAMERA" in d.granted_permissions
+    assert "android.permission.ACCESS_FINE_LOCATION" in d.requested_permissions
+    assert "android.permission.ACCESS_FINE_LOCATION" not in d.granted_permissions
+
+
+@pytest.mark.asyncio
+async def test_get_package_info_tool_unknown_package_serializes_as_package_not_found() -> None:
+    mcp = _build_test_server(
+        FakeBackend(
+            dumpsys_package_result=CommandResult(
+                stdout="Unable to find package: com.zzz.nope\n",
+                stderr="",
+                exit_code=0,
+                duration_ms=6.0,
+            )
+        )
+    )
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "get_package_info", {"serial": "emulator-5554", "package_name": "com.zzz.nope"}
+        )
+
+    assert result.data.status == "error"
+    assert result.data.error is not None
+    assert result.data.error.code == "PACKAGE_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_get_package_info_tool_is_registered() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        names = {tool.name for tool in await client.list_tools()}
+
+    assert "get_package_info" in names

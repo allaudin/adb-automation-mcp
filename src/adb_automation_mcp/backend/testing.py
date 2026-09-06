@@ -82,6 +82,7 @@ class FakeBackend:
         setprop_result: CommandResult | None = None,
         list_packages_result: CommandResult | None = None,
         pm_path_result: CommandResult | None = None,
+        dumpsys_package_result: CommandResult | None = None,
         install_result: CommandResult | None = None,
         pm_uninstall_result: CommandResult | None = None,
         pm_install_existing_result: CommandResult | None = None,
@@ -392,6 +393,60 @@ class FakeBackend:
             stderr="",
             exit_code=0,
             duration_ms=45.0,
+        )
+        # `adb shell dumpsys package PACKAGE` — trimmed to the one
+        # "Package [<name>]" setting block plus its permission sub-blocks. Field
+        # names/shapes (appId, versionCode+minSdk+targetSdk on one line,
+        # timeStamp/lastUpdateTime, flags=[ ... ], "requested permissions:" /
+        # "install permissions:" / per-user "User N:" install-state line +
+        # "runtime permissions:" with "NAME: granted=BOOL, flags=[...]") are all
+        # transcribed from live car-AVD output; the package here is synthetic
+        # (a Play-installed, non-shared-uid app) so the parser sees an
+        # installer, a /data/app codePath, and a mix of granted/denied runtime
+        # perms. An unknown package makes dumpsys print
+        # "Unable to find package: <name>" and still exit 0 — see
+        # PackagesService.get_package_info for how that's classified.
+        self._dumpsys_package_result = dumpsys_package_result or CommandResult(
+            stdout=(
+                "Packages:\n"
+                "  Package [com.example.thirdparty] (a1b2c3d):\n"
+                "    appId=10234\n"
+                "    pkg=Package{deadbeef com.example.thirdparty}\n"
+                "    codePath=/data/app/~~kQ7d==/com.example.thirdparty-Ab3c==\n"
+                "    versionCode=4500 minSdk=24 targetSdk=34\n"
+                "    versionName=4.5.0\n"
+                "    splits=[base]\n"
+                "    flags=[ HAS_CODE ALLOW_CLEAR_USER_DATA ALLOW_BACKUP ]\n"
+                "    timeStamp=2026-09-01 12:00:00\n"
+                "    lastUpdateTime=2026-09-03 08:30:00\n"
+                "    installerPackageName=com.android.vending\n"
+                "    installerPackageUid=10123\n"
+                "    signatures=PackageSignatures{1a2b version:3, signatures:[abcd1234], past signatures:[]}\n"
+                "    declared permissions:\n"
+                "      com.example.thirdparty.CUSTOM: prot=signature\n"
+                "    requested permissions:\n"
+                "      android.permission.INTERNET\n"
+                "      android.permission.ACCESS_NETWORK_STATE\n"
+                "      android.permission.CAMERA\n"
+                "      android.permission.ACCESS_FINE_LOCATION\n"
+                "    install permissions:\n"
+                "      android.permission.INTERNET: granted=true\n"
+                "      android.permission.ACCESS_NETWORK_STATE: granted=true\n"
+                "    User 0: ceDataInode=270565 deDataInode=49330 installed=true hidden=false "
+                "suspended=false stopped=false notLaunched=false enabled=1 instant=false "
+                "virtual=false quarantined=false\n"
+                "      installReason=0\n"
+                "      dataDir=/data/user/0/com.example.thirdparty\n"
+                "      firstInstallTime=2026-09-01 12:00:00\n"
+                "    User 0:\n"
+                "      gids=[3003]\n"
+                "      runtime permissions:\n"
+                "        android.permission.CAMERA: granted=true, flags=[ USER_SET ]\n"
+                "        android.permission.ACCESS_FINE_LOCATION: granted=false, flags=[ ]\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=120.0,
         )
         # `adb install [flags] apk_path` — the well-documented, long-stable
         # "Performing Streamed Install" / "Success" wording modern adb uses
@@ -742,6 +797,8 @@ class FakeBackend:
             return self._list_packages_result
         if command.startswith("pm path"):
             return self._pm_path_result
+        if command.startswith("dumpsys package "):
+            return self._dumpsys_package_result
         if command.startswith("pm uninstall"):
             return self._pm_uninstall_result
         if command.startswith("pm install-existing --user "):

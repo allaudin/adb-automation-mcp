@@ -160,6 +160,66 @@ class PackagePathInfo(BaseModel):
         return f"{self.package_name} on {self.serial}{scope}: {n} APKs (base + {len(self.split_apks)} split)."
 
 
+_ENABLED_STATE_NAMES = {
+    "0": "default",
+    "1": "enabled",
+    "2": "disabled",
+    "3": "disabled_by_user",
+    "4": "disabled_until_used",
+}
+
+
+class PackageUserInfo(BaseModel):
+    """Per-Android-user state for a package, from a `dumpsys package` "User N:"
+    install-state line. Any field pm's output for this build doesn't carry is
+    left null rather than guessed.
+    """
+
+    user_id: int
+    installed: bool | None
+    enabled_state: str
+    stopped: bool | None
+    hidden: bool | None
+    suspended: bool | None
+
+
+class PackageInfo(BaseModel):
+    """A curated, deliberately minimal snapshot of one installed package, parsed
+    from `adb shell dumpsys package <pkg>`. This is NOT the whole dumpsys dump —
+    just the stable fields worth an automation contract. Every field is
+    best-effort: a value pm's output for this Android version doesn't carry
+    comes back null (or an empty list), never an error.
+    """
+
+    serial: str
+    package_name: str
+    uid: int | None
+    version_code: int | None
+    version_name: str | None
+    min_sdk: int | None
+    target_sdk: int | None
+    code_path: str | None
+    data_dir: str | None
+    installer_package_name: str | None
+    first_install_time: str | None
+    last_update_time: str | None
+    is_system: bool
+    flags: list[str]
+    users: list[PackageUserInfo]
+    requested_permissions: list[str]
+    granted_permissions: list[str]
+
+    def summary(self) -> str:
+        ver = self.version_name or (str(self.version_code) if self.version_code is not None else "?")
+        kind = "system" if self.is_system else "user"
+        return (
+            f"{self.package_name} {ver} ({kind}) on {self.serial}: "
+            f"{len(self.granted_permissions)} granted / "
+            f"{len(self.requested_permissions)} requested permissions, "
+            f"{len(self.users)} user(s)."
+        )
+
+
 class PackagesService:
     """Installed-app management logic."""
 
@@ -359,6 +419,24 @@ class PackagesService:
             split_apks=[p for p in paths if p != base_apk],
         )
 
+    async def get_package_info(self, serial: str, package_name: str) -> PackageInfo:
+        if not package_name.strip():
+            raise InvalidArgumentError("package_name must not be empty.", details={"serial": serial})
+
+        result = await self._backend.shell(serial, f"dumpsys package {shlex.quote(package_name)}")
+        self._raise_for_shell_failure(serial, result)
+
+        text = result.stdout
+        # dumpsys exits 0 even for an unknown package; it says so in words, and
+        # never emits a "Package [<name>]" block for one.
+        if f"Unable to find package: {package_name}" in text or f"Package [{package_name}]" not in text:
+            raise PackageNotFoundError(
+                f"dumpsys package has no record of {package_name} on {serial}.",
+                details={"serial": serial, "package_name": package_name},
+            )
+
+        return _parse_dumpsys_package(serial, package_name, text)
+
 
 def _parse_pm_path(output: str) -> list[str]:
     paths: list[str] = []
@@ -401,6 +479,180 @@ def _raise_for_pm_path_failure(
                 "exit_code": result.exit_code,
             },
         )
+
+
+_PKG_BLOCK_RE = re.compile(r"^  Package \[(?P<name>[^\]]+)\] \(")
+_KV_RE = re.compile(r"(\w+)=((?:\[[^\]]*\])|(?:\S+))")
+_GRANTED_TRUE_RE = re.compile(r"^\s+(?P<perm>[\w.]+): granted=true\b")
+_USER_LINE_RE = re.compile(r"^\s+User (?P<uid>\d+):\s")
+
+
+def _first_value(block: list[str], key: str) -> str | None:
+    prefix = f"{key}="
+    for raw in block:
+        stripped = raw.strip()
+        if stripped.startswith(prefix):
+            value = stripped[len(prefix) :].strip()
+            return value or None
+    return None
+
+
+def _parse_flags(block: list[str], key: str) -> list[str]:
+    for raw in block:
+        stripped = raw.strip()
+        if stripped.startswith(f"{key}=["):
+            inner = stripped[stripped.index("[") + 1 : stripped.rindex("]")] if "]" in stripped else ""
+            return inner.split()
+    return []
+
+
+def _parse_requested_permissions(block: list[str]) -> list[str]:
+    perms: list[str] = []
+    collecting = False
+    for raw in block:
+        stripped = raw.strip()
+        if stripped == "requested permissions:":
+            collecting = True
+            continue
+        if collecting:
+            # The list ends at the next "<something>:" section header or a
+            # non-permission-looking line.
+            if not stripped or stripped.endswith(":") or "=" in stripped:
+                break
+            perms.append(stripped)
+    return perms
+
+
+def _tri_bool(kv: dict[str, str], name: str) -> bool | None:
+    v = kv.get(name)
+    return None if v is None else v == "true"
+
+
+def _parse_user_states(block: list[str]) -> list[PackageUserInfo]:
+    users: list[PackageUserInfo] = []
+    for raw in block:
+        m = _USER_LINE_RE.match(raw)
+        if m is None or "installed=" not in raw:
+            continue
+        kv = dict(_KV_RE.findall(raw))
+        users.append(
+            PackageUserInfo(
+                user_id=int(m.group("uid")),
+                installed=_tri_bool(kv, "installed"),
+                enabled_state=_ENABLED_STATE_NAMES.get(kv.get("enabled", ""), "unknown"),
+                stopped=_tri_bool(kv, "stopped"),
+                hidden=_tri_bool(kv, "hidden"),
+                suspended=_tri_bool(kv, "suspended"),
+            )
+        )
+    return users
+
+
+def _parse_granted_permissions(full_text: str) -> list[str]:
+    # Scanned over the whole dumpsys output, not just the Package block: for a
+    # shared-uid package the runtime-permission grants live in a later
+    # "Shared users:" section. dumpsys package <pkg> is filtered to the one
+    # package, so every "granted=true" line here belongs to it.
+    seen: dict[str, None] = {}
+    for line in full_text.splitlines():
+        m = _GRANTED_TRUE_RE.match(line)
+        if m is not None:
+            seen.setdefault(m.group("perm"), None)
+    return list(seen)
+
+
+def _parse_dumpsys_package(serial: str, package_name: str, text: str) -> PackageInfo:
+    lines = text.splitlines()
+    start: int | None = None
+    for i, ln in enumerate(lines):
+        m = _PKG_BLOCK_RE.match(ln)
+        if m is not None and m.group("name") == package_name:
+            start = i
+            break
+    if start is None:
+        # The caller already checked for the block; treat a mismatch here as a
+        # malformed dump rather than crashing.
+        return PackageInfo(
+            serial=serial,
+            package_name=package_name,
+            uid=None,
+            version_code=None,
+            version_name=None,
+            min_sdk=None,
+            target_sdk=None,
+            code_path=None,
+            data_dir=None,
+            installer_package_name=None,
+            first_install_time=None,
+            last_update_time=None,
+            is_system=False,
+            flags=[],
+            users=[],
+            requested_permissions=[],
+            granted_permissions=_parse_granted_permissions(text),
+        )
+
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        ln = lines[i]
+        if ln and not ln.startswith(" "):  # next column-0 section
+            end = i
+            break
+        if _PKG_BLOCK_RE.match(ln):  # another package block
+            end = i
+            break
+    block = lines[start:end]
+
+    version_code: int | None = None
+    min_sdk: int | None = None
+    target_sdk: int | None = None
+    version_line = _first_value(block, "versionCode")
+    if version_line is not None:
+        # "versionCode=4500 minSdk=24 targetSdk=34" — _first_value returns only
+        # the first whitespace-delimited token, so re-scan the raw line for the
+        # siblings.
+        for raw in block:
+            if raw.strip().startswith("versionCode="):
+                kv = dict(_KV_RE.findall(raw))
+                version_code = _safe_int(kv.get("versionCode"))
+                min_sdk = _safe_int(kv.get("minSdk"))
+                target_sdk = _safe_int(kv.get("targetSdk"))
+                break
+
+    installer = _first_value(block, "installerPackageName")
+    if installer == "null":
+        installer = None
+
+    flags = _parse_flags(block, "flags") or _parse_flags(block, "pkgFlags")
+
+    return PackageInfo(
+        serial=serial,
+        package_name=package_name,
+        uid=_safe_int(_first_value(block, "appId") or _first_value(block, "userId")),
+        version_code=version_code,
+        version_name=_first_value(block, "versionName"),
+        min_sdk=min_sdk,
+        target_sdk=target_sdk,
+        code_path=_first_value(block, "codePath"),
+        data_dir=_first_value(block, "dataDir"),
+        installer_package_name=installer,
+        first_install_time=_first_value(block, "firstInstallTime"),
+        last_update_time=_first_value(block, "lastUpdateTime"),
+        is_system="SYSTEM" in flags,
+        flags=flags,
+        users=_parse_user_states(block),
+        requested_permissions=_parse_requested_permissions(block),
+        granted_permissions=_parse_granted_permissions(text),
+    )
+
+
+def _safe_int(value: str | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
 
 
 def _parse_package_list(output: str) -> list[str]:

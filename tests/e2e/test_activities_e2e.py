@@ -226,3 +226,76 @@ async def test_resolve_activity_tool_is_registered() -> None:
         names = {tool.name for tool in await client.list_tools()}
 
     assert "resolve_activity" in names
+
+
+# --- get_foreground_activity ---------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_foreground_activity_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "get_foreground_activity", {"serial": "emulator-5554"}
+        )
+
+    assert result.data.status == "success"
+    d = result.data.data
+    assert d.resolved is True
+    assert d.component == "com.android.car.carlauncher/.CarLauncher"
+    assert d.user_id == 10
+    assert d.display_id == 0
+    assert d.task_id == 1000004
+    assert len(d.per_display) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_foreground_activity_tool_no_resumed_serializes_as_resolved_false() -> None:
+    mcp = _build_test_server(
+        FakeBackend(
+            dumpsys_activity_activities_result=CommandResult(
+                stdout="Display #0 (activities from top to bottom):\n  (nothing)\n",
+                stderr="",
+                exit_code=0,
+                duration_ms=5.0,
+            )
+        )
+    )
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "get_foreground_activity", {"serial": "emulator-5554"}
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.resolved is False
+    assert result.data.data.component is None
+
+
+@pytest.mark.asyncio
+async def test_get_foreground_activity_tool_unknown_serial_returns_device_not_found() -> None:
+    mcp = _build_test_server(
+        FakeBackend(
+            dumpsys_activity_activities_result=CommandResult(
+                stdout="", stderr="adb: device 'bogus' not found\n", exit_code=1, duration_ms=5.0
+            )
+        )
+    )
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("get_foreground_activity", {"serial": "bogus"})
+
+    assert result.data.status == "error"
+    assert result.data.error is not None
+    assert result.data.error.code == "DEVICE_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_get_foreground_activity_tool_is_registered() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        names = {tool.name for tool in await client.list_tools()}
+
+    assert "get_foreground_activity" in names

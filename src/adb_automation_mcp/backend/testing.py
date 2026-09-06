@@ -116,6 +116,7 @@ class FakeBackend:
         send_broadcast_result: CommandResult | None = None,
         start_activity_result: CommandResult | None = None,
         resolve_activity_result: CommandResult | None = None,
+        dumpsys_activity_activities_result: CommandResult | None = None,
         start_service_result: CommandResult | None = None,
         force_stop_result: CommandResult | None = None,
         pull_result: CommandResult | None = None,
@@ -546,6 +547,39 @@ class FakeBackend:
             exit_code=0,
             duration_ms=90.0,
         )
+        # `adb shell dumpsys activity activities` — trimmed to the markers
+        # ActivitiesService.get_foreground_activity parses: a "Display #N"
+        # header, per-task "topResumedActivity=ActivityRecord{...}", the
+        # root-scope "ResumedActivity: ActivityRecord{...}", and window state's
+        # "mFocusedApp=ActivityRecord{...}". Field shapes captured live from a
+        # car AVD (single display, launcher in foreground, user 10).
+        self._dumpsys_activity_activities_result = dumpsys_activity_activities_result or CommandResult(
+            stdout=(
+                "ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)\n"
+                "Display #0 (activities from top to bottom):\n"
+                "  * Task{a6084dc #1 type=home U=0 visible=true}\n"
+                "    * Task{b76de50 #1000004 type=home A=1010050:com.android.car.carlauncher U=10}\n"
+                "      isSleeping=false\n"
+                "      topResumedActivity=ActivityRecord{138464275 u10 "
+                "com.android.car.carlauncher/.CarLauncher t1000004}\n"
+                "      * Hist  #0: ActivityRecord{138464275 u10 "
+                "com.android.car.carlauncher/.CarLauncher t1000004}\n"
+                "        packageName=com.android.car.carlauncher\n"
+                "\n"
+                "  ResumedActivity: ActivityRecord{138464275 u10 "
+                "com.android.car.carlauncher/.CarLauncher t1000004}\n"
+                "\n"
+                "ActivityTaskSupervisor state:\n"
+                "  topDisplayFocusedRootTask=Task{a6084dc #1 type=home}\n"
+                "  mCurrentFocus=Window{f78bd34 u10 "
+                "com.android.car.carlauncher/com.android.car.carlauncher.CarLauncher}\n"
+                "  mFocusedApp=ActivityRecord{138464275 u10 "
+                "com.android.car.carlauncher/.CarLauncher t1000004}\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=180.0,
+        )
         # `adb shell am start-service` — the well-documented, long-stable
         # AOSP `Am.java`/`runStartService` output shape for a normal start:
         # just the "Starting service: Intent { ... }" line. Not captured
@@ -886,6 +920,8 @@ class FakeBackend:
             return self._start_service_result
         if command.startswith("cmd package resolve-activity"):
             return self._resolve_activity_result
+        if command == "dumpsys activity activities":
+            return self._dumpsys_activity_activities_result
         if command.startswith("am start "):
             return self._start_activity_result
         if command.startswith("am force-stop "):

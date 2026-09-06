@@ -6,12 +6,12 @@ registers at server startup.
 from __future__ import annotations
 
 from adb_automation_mcp.modules.diagnostics.service import DiagnosticsService
-from adb_automation_mcp.modules.diagnostics.tools import check_adb_available
+from adb_automation_mcp.modules.diagnostics.tools import check_adb_available, get_adb_version
 from adb_automation_mcp.registry import ModuleManifest
 
 MODULE = ModuleManifest(
     name="diagnostics",
     service_factory=DiagnosticsService,
-    tools=[check_adb_available],
+    tools=[check_adb_available, get_adb_version],
     resources=[],
 )

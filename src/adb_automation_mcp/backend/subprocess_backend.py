@@ -1,11 +1,13 @@
 """The real AdbBackend implementation: executes adb as a subprocess.
 
-`list_devices`, `kill_server`, `start_server`, `connect`, `disconnect`, `root`, and
-`shell` are exercised by modules built so far (diagnostics, device_info, connection, user);
+`list_devices`, `version`, `wait_for_device`, `kill_server`, `start_server`, `connect`,
+`disconnect`, `root`, `unroot`, and `shell` are exercised by modules built so far
+(diagnostics, device_info, connection, user);
 `install` is used by the packages module's install_apk (uninstall and
 install-existing-for-user go through `shell` instead — see packages/service.py for
 why). `exec_out` (raw-bytes stdout, via `adb exec-out`) is used by the screen module's
-take_screenshot. `uninstall` and `push` are implemented to the same standard but not yet
+take_screenshot. `forward` is used by the port_forwarding module's create_forward.
+`uninstall` and `push` are implemented to the same standard but not yet
 used by any module; `pull` is used by files. None of these have automated
 contract-test coverage against the real binary yet — verified manually against a real
 device instead.
@@ -36,11 +38,16 @@ class SubprocessBackend:
         self._adb_path = adb_path or shutil.which("adb") or "adb"
         self._timeout_s = timeout_s
 
-    async def _run_bytes(self, *args: str) -> ExecOutResult:
+    async def _run_bytes(self, *args: str, timeout_s: float | None = None) -> ExecOutResult:
         """Spawn adb and capture stdout as raw bytes (stderr still decoded). The
         common path for both _run (which decodes stdout) and exec_out (which
         must not, since its output is binary).
+
+        timeout_s overrides the backend's default per-command timeout for this
+        one call — used by wait_for_device, whose whole job is to block for as
+        long as the caller asked (the 10s default would defeat it).
         """
+        effective_timeout = self._timeout_s if timeout_s is None else timeout_s
         loop = asyncio.get_running_loop()
         start = loop.time()
 
@@ -62,13 +69,15 @@ class SubprocessBackend:
             ) from exc
 
         try:
-            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=self._timeout_s)
+            stdout_b, stderr_b = await asyncio.wait_for(
+                proc.communicate(), timeout=effective_timeout
+            )
         except asyncio.TimeoutError as exc:
             proc.kill()
             await proc.wait()
             raise AdbTimeoutError(
-                f"adb command timed out after {self._timeout_s * 1000:.0f}ms.",
-                details={"timeout_ms": self._timeout_s * 1000, "command": " ".join(args)},
+                f"adb command timed out after {effective_timeout * 1000:.0f}ms.",
+                details={"timeout_ms": effective_timeout * 1000, "command": " ".join(args)},
                 remediation="The device or adb server may be busy or unresponsive. Retrying is reasonable.",
             ) from exc
 
@@ -80,8 +89,8 @@ class SubprocessBackend:
             duration_ms=duration_ms,
         )
 
-    async def _run(self, *args: str) -> CommandResult:
-        result = await self._run_bytes(*args)
+    async def _run(self, *args: str, timeout_s: float | None = None) -> CommandResult:
+        result = await self._run_bytes(*args, timeout_s=timeout_s)
         return CommandResult(
             stdout=result.stdout.decode("utf-8", errors="replace"),
             stderr=result.stderr,
@@ -92,6 +101,19 @@ class SubprocessBackend:
     async def list_devices(self) -> list[DeviceInfo]:
         result = await self._run("devices", "-l")
         return _parse_devices(result.stdout)
+
+    async def version(self) -> CommandResult:
+        return await self._run("version")
+
+    async def wait_for_device(
+        self, serial: str, wait_token: str, timeout_s: float
+    ) -> CommandResult:
+        # wait_token is a `wait-for-...` argument built (and validated against a
+        # closed enum set) by the caller — e.g. "wait-for-any-device". adb blocks
+        # until the state is reached, so this call uses the caller's timeout, not
+        # the backend default; a timeout surfaces as AdbTimeoutError like any
+        # other slow command.
+        return await self._run("-s", serial, wait_token, timeout_s=timeout_s)
 
     async def shell(self, serial: str, command: str) -> CommandResult:
         return await self._run("-s", serial, "shell", command)
@@ -112,6 +134,12 @@ class SubprocessBackend:
     async def pull(self, serial: str, remote_path: str, local_path: str) -> CommandResult:
         return await self._run("-s", serial, "pull", remote_path, local_path)
 
+    async def forward(
+        self, serial: str, local: str, remote: str, no_rebind: bool
+    ) -> CommandResult:
+        flags = ["--no-rebind"] if no_rebind else []
+        return await self._run("-s", serial, "forward", *flags, local, remote)
+
     async def kill_server(self) -> CommandResult:
         return await self._run("kill-server")
 
@@ -126,6 +154,9 @@ class SubprocessBackend:
 
     async def root(self, serial: str) -> CommandResult:
         return await self._run("-s", serial, "root")
+
+    async def unroot(self, serial: str) -> CommandResult:
+        return await self._run("-s", serial, "unroot")
 
 
 def _parse_devices(stdout: str) -> list[DeviceInfo]:

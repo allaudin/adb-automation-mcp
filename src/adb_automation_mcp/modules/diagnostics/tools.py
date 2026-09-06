@@ -10,7 +10,11 @@ from typing import cast
 
 from fastmcp import Context
 
-from adb_automation_mcp.modules.diagnostics.service import AdbAvailability, DiagnosticsService
+from adb_automation_mcp.modules.diagnostics.service import (
+    AdbAvailability,
+    AdbVersionInfo,
+    DiagnosticsService,
+)
 from adb_automation_mcp.registry import category
 
 
@@ -47,3 +51,48 @@ async def check_adb_available(ctx: Context) -> AdbAvailability:
     services = cast("dict[str, object]", ctx.lifespan_context["services"])
     diagnostics = cast(DiagnosticsService, services["diagnostics"])
     return await diagnostics.check_adb_available()
+
+
+@category("read")
+async def get_adb_version(ctx: Context) -> AdbVersionInfo:
+    """Report the version of the adb client this server is driving.
+
+    Useful before attempting anything whose availability depends on the host's
+    platform-tools release — wireless pairing, split-APK install, incremental
+    delivery — so an agent can check the host is new enough instead of failing
+    mid-automation and guessing why. Reads `adb version`; changes nothing.
+
+    Returns:
+        The parsed adb version: the wire-protocol bridge_version, the
+        platform_tools_version that actually tracks feature support (null on
+        very old builds), and optional revision, installed_path, and running_on
+        fields. raw holds the unparsed command output for reference. Any line
+        adb omits or rewords becomes null rather than an error.
+
+    Error handling:
+        Raises ADB_UNAVAILABLE if the adb binary cannot be found or executed,
+        and BACKEND_ERROR if adb runs but exits non-zero. Reworded or partial
+        version output is not an error — it parses to whatever fields are present.
+
+    Example:
+        Called with no arguments. A typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "adb platform-tools 35.0.2 (bridge 1.0.41).",
+          "data": {
+            "bridge_version": "1.0.41",
+            "platform_tools_version": "35.0.2",
+            "revision": null,
+            "installed_path": "/usr/lib/android-sdk/platform-tools/adb",
+            "running_on": "Linux 6.8.0 (x86_64)",
+            "raw": "Android Debug Bridge version 1.0.41\nVersion 35.0.2\n..."
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    diagnostics = cast(DiagnosticsService, services["diagnostics"])
+    return await diagnostics.get_adb_version()

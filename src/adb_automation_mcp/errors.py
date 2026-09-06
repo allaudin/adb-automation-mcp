@@ -265,6 +265,17 @@ class NetworkToolUnavailableError(AdbError):
     code = "NETWORK_TOOL_UNAVAILABLE"
 
 
+class PortForwardConflictError(AdbError):
+    """`adb forward --no-rebind` was asked to bind a host endpoint that already
+    has a forward on it ("cannot rebind existing socket"). The caller explicitly
+    opted out of silently replacing the existing mapping, so this is surfaced
+    rather than swallowed — remove the existing forward first, or retry without
+    no_rebind to take it over.
+    """
+
+    code = "PORT_FORWARD_CONFLICT"
+
+
 class DeviceClockUnavailableError(AdbError):
     """`date` ran but its output didn't match the machine-readable
     timestamp format this tool requests — e.g. because the device's `date`

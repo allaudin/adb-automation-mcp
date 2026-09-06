@@ -310,3 +310,76 @@ async def test_install_existing_for_user_tool_unknown_package_returns_error_enve
     assert result.data.status == "error"
     assert result.data.error is not None
     assert result.data.error.code == "PACKAGE_NOT_FOUND"
+
+
+# --- get_package_path --------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_package_path_tool_round_trips_with_base_and_splits() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "get_package_path",
+            {"serial": "emulator-5554", "package_name": "com.example.thirdparty"},
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.package_name == "com.example.thirdparty"
+    assert len(result.data.data.paths) == 3
+    assert result.data.data.base_apk.endswith("/base.apk")
+    assert len(result.data.data.split_apks) == 2
+
+
+@pytest.mark.asyncio
+async def test_get_package_path_tool_single_apk_serializes_with_empty_splits() -> None:
+    mcp = _build_test_server(
+        FakeBackend(
+            pm_path_result=CommandResult(
+                stdout="package:/system/priv-app/CarSettings/CarSettings.apk\n",
+                stderr="",
+                exit_code=0,
+                duration_ms=10.0,
+            )
+        )
+    )
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "get_package_path",
+            {"serial": "emulator-5554", "package_name": "com.android.car.settings"},
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.split_apks == []
+    assert result.data.data.base_apk == "/system/priv-app/CarSettings/CarSettings.apk"
+
+
+@pytest.mark.asyncio
+async def test_get_package_path_tool_unknown_package_serializes_as_package_not_found() -> None:
+    mcp = _build_test_server(
+        FakeBackend(
+            pm_path_result=CommandResult(stdout="", stderr="", exit_code=1, duration_ms=6.0)
+        )
+    )
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "get_package_path",
+            {"serial": "emulator-5554", "package_name": "com.zzz.nope"},
+        )
+
+    assert result.data.status == "error"
+    assert result.data.error is not None
+    assert result.data.error.code == "PACKAGE_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_get_package_path_tool_is_registered() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        names = {tool.name for tool in await client.list_tools()}
+
+    assert "get_package_path" in names

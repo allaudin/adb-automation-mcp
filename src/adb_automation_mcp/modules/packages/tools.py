@@ -15,6 +15,7 @@ from adb_automation_mcp.modules.packages.service import (
     InstallResult,
     PackageFilter,
     PackageList,
+    PackagePathInfo,
     PackagesService,
     UninstallResult,
 )
@@ -298,3 +299,59 @@ async def install_existing_for_user(
     services = cast("dict[str, object]", ctx.lifespan_context["services"])
     packages = cast(PackagesService, services["packages"])
     return await packages.install_existing_for_user(serial, package_name, user_id)
+
+
+@category("read")
+async def get_package_path(
+    ctx: Context, serial: str, package_name: str, user_id: int | None = None
+) -> PackagePathInfo:
+    """Resolve an installed package's on-device APK paths: `adb shell pm path`.
+
+    Use this before pulling or analyzing an app's APKs — it returns the base
+    APK plus any split APKs (`split_config.*`) for a split-installed app, so a
+    follow-up pull can fetch every piece.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+        package_name: The application id to resolve, e.g. "com.example.app".
+        user_id: Resolve against one Android user's view (`--user ID`, see
+            list_users). Omit to use pm's default user.
+
+    Returns:
+        The serial, package_name, user_id, and paths — every APK path pm
+        reported, in its order. base_apk is the base APK (identified by a
+        trailing "/base.apk", else the first path), and split_apks is the
+        rest; for a monolithic install split_apks is empty and base_apk is the
+        single path.
+
+    Error handling:
+        An empty package_name or negative user_id raises INVALID_ARGUMENT
+        before any adb call. An unknown serial raises DEVICE_NOT_FOUND; an
+        unreachable adb binary raises ADB_UNAVAILABLE. A package that isn't
+        installed (or isn't installed for the requested user) raises
+        PACKAGE_NOT_FOUND — `pm path` reports both the same way. A recognizably
+        bad user scope raises USER_NOT_FOUND where pm says so.
+
+    Example:
+        Called with serial="emulator-5554", package_name="com.android.car.settings".
+        A typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "com.android.car.settings on emulator-5554: 1 APK.",
+          "data": {
+            "serial": "emulator-5554",
+            "package_name": "com.android.car.settings",
+            "user_id": null,
+            "paths": ["/system/priv-app/CarSettings/CarSettings.apk"],
+            "base_apk": "/system/priv-app/CarSettings/CarSettings.apk",
+            "split_apks": []
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    packages = cast(PackagesService, services["packages"])
+    return await packages.get_package_path(serial, package_name, user_id=user_id)

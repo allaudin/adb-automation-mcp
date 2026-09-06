@@ -17,7 +17,11 @@ from adb_automation_mcp.errors import (
     PackageNotFoundError,
     UserNotFoundError,
 )
-from adb_automation_mcp.modules.packages.service import PackageList, PackagesService
+from adb_automation_mcp.modules.packages.service import (
+    PackageList,
+    PackagePathInfo,
+    PackagesService,
+)
 
 
 def test_service_constructs_with_backend() -> None:
@@ -583,3 +587,181 @@ async def test_install_existing_for_user__backend_unavailable_propagates() -> No
 
     with pytest.raises(AdbUnavailableError):
         await service.install_existing_for_user("emulator-5554", "com.example.app", 10)
+
+
+# --- get_package_path --------------------------------------------------------
+
+
+class _ShellRecordingBackend(FakeBackend):
+    """Records the last shell() command, so a test can assert exact `pm path`
+    construction.
+    """
+
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+        self.last_shell_command: str | None = None
+
+    async def shell(self, serial: str, command: str) -> CommandResult:
+        self.last_shell_command = command
+        return await super().shell(serial, command)
+
+
+@pytest.mark.asyncio
+async def test_get_package_path__base_plus_splits_parsed_and_split_out() -> None:
+    backend = _ShellRecordingBackend()
+    service = PackagesService(backend)
+
+    result = await service.get_package_path("emulator-5554", "com.example.thirdparty")
+
+    assert backend.last_shell_command == "pm path com.example.thirdparty"
+    assert isinstance(result, PackagePathInfo)
+    assert len(result.paths) == 3
+    assert result.base_apk.endswith("/base.apk")
+    assert len(result.split_apks) == 2
+    assert all("split_config" in p for p in result.split_apks)
+
+
+@pytest.mark.asyncio
+async def test_get_package_path__single_apk_has_no_splits() -> None:
+    backend = FakeBackend(
+        pm_path_result=CommandResult(
+            stdout="package:/system/priv-app/CarSettings/CarSettings.apk\n",
+            stderr="",
+            exit_code=0,
+            duration_ms=10.0,
+        )
+    )
+    service = PackagesService(backend)
+
+    result = await service.get_package_path("emulator-5554", "com.android.car.settings")
+
+    assert result.paths == ["/system/priv-app/CarSettings/CarSettings.apk"]
+    assert result.base_apk == "/system/priv-app/CarSettings/CarSettings.apk"
+    assert result.split_apks == []
+
+
+@pytest.mark.asyncio
+async def test_get_package_path__user_scoping_adds_user_flag_before_package() -> None:
+    backend = _ShellRecordingBackend()
+    service = PackagesService(backend)
+
+    await service.get_package_path("emulator-5554", "com.example.thirdparty", user_id=10)
+
+    assert backend.last_shell_command == "pm path --user 10 com.example.thirdparty"
+
+
+@pytest.mark.asyncio
+async def test_get_package_path__empty_package_name_rejected_before_backend() -> None:
+    backend = _ShellRecordingBackend()
+    service = PackagesService(backend)
+
+    with pytest.raises(InvalidArgumentError):
+        await service.get_package_path("emulator-5554", "   ")
+
+    assert backend.last_shell_command is None
+
+
+@pytest.mark.asyncio
+async def test_get_package_path__negative_user_id_rejected_before_backend() -> None:
+    backend = _ShellRecordingBackend()
+    service = PackagesService(backend)
+
+    with pytest.raises(InvalidArgumentError):
+        await service.get_package_path("emulator-5554", "com.example.app", user_id=-1)
+
+    assert backend.last_shell_command is None
+
+
+@pytest.mark.asyncio
+async def test_get_package_path__terse_empty_exit1_maps_to_package_not_found() -> None:
+    # AOSP automotive image behavior: unknown package → exit 1, no output at all.
+    backend = FakeBackend(
+        pm_path_result=CommandResult(stdout="", stderr="", exit_code=1, duration_ms=8.0)
+    )
+    service = PackagesService(backend)
+
+    with pytest.raises(PackageNotFoundError):
+        await service.get_package_path("emulator-5554", "com.zzz.nope")
+
+
+@pytest.mark.asyncio
+async def test_get_package_path__unknown_package_wording_maps_to_package_not_found() -> None:
+    backend = FakeBackend(
+        pm_path_result=CommandResult(
+            stdout="", stderr="Error: package com.zzz.nope not found\n", exit_code=1, duration_ms=8.0
+        )
+    )
+    service = PackagesService(backend)
+
+    with pytest.raises(PackageNotFoundError):
+        await service.get_package_path("emulator-5554", "com.zzz.nope")
+
+
+@pytest.mark.asyncio
+async def test_get_package_path__bad_user_wording_maps_to_user_not_found() -> None:
+    backend = FakeBackend(
+        pm_path_result=CommandResult(
+            stdout="", stderr="Error: bad user number\n", exit_code=1, duration_ms=8.0
+        )
+    )
+    service = PackagesService(backend)
+
+    with pytest.raises(UserNotFoundError):
+        await service.get_package_path("emulator-5554", "com.example.app", user_id=77)
+
+
+@pytest.mark.asyncio
+async def test_get_package_path__unknown_serial_maps_to_device_not_found() -> None:
+    backend = FakeBackend(
+        pm_path_result=CommandResult(
+            stdout="", stderr="adb: device 'bogus' not found\n", exit_code=1, duration_ms=8.0
+        )
+    )
+    service = PackagesService(backend)
+
+    with pytest.raises(DeviceNotFoundError):
+        await service.get_package_path("bogus", "com.example.app")
+
+
+@pytest.mark.asyncio
+async def test_get_package_path__zero_exit_but_no_package_lines_is_not_a_crash() -> None:
+    backend = FakeBackend(
+        pm_path_result=CommandResult(
+            stdout="something unexpected\n", stderr="", exit_code=0, duration_ms=8.0
+        )
+    )
+    service = PackagesService(backend)
+
+    with pytest.raises(PackageNotFoundError):
+        await service.get_package_path("emulator-5554", "com.example.app")
+
+
+@pytest.mark.asyncio
+async def test_get_package_path__backend_unavailable_propagates() -> None:
+    service = PackagesService(FakeBackend(unavailable=True))
+
+    with pytest.raises(AdbUnavailableError):
+        await service.get_package_path("emulator-5554", "com.example.app")
+
+
+def test_package_path_info_summary_variants() -> None:
+    one = PackagePathInfo(
+        serial="emulator-5554",
+        package_name="com.x",
+        user_id=None,
+        paths=["/a/base.apk"],
+        base_apk="/a/base.apk",
+        split_apks=[],
+    ).summary()
+    assert "1 APK" in one
+
+    many = PackagePathInfo(
+        serial="emulator-5554",
+        package_name="com.x",
+        user_id=10,
+        paths=["/a/base.apk", "/a/split_config.en.apk"],
+        base_apk="/a/base.apk",
+        split_apks=["/a/split_config.en.apk"],
+    ).summary()
+    assert "2 APKs" in many
+    assert "user 10" in many

@@ -81,6 +81,7 @@ class FakeBackend:
         getprop_context_result: CommandResult | None = None,
         setprop_result: CommandResult | None = None,
         list_packages_result: CommandResult | None = None,
+        pm_path_result: CommandResult | None = None,
         install_result: CommandResult | None = None,
         pm_uninstall_result: CommandResult | None = None,
         pm_install_existing_result: CommandResult | None = None,
@@ -373,6 +374,24 @@ class FakeBackend:
             stderr="",
             exit_code=0,
             duration_ms=120.0,
+        )
+        # `adb shell pm path [--user N] PACKAGE` — one "package:<apk path>" line
+        # per APK. The base-only single-line shape was captured live from a car
+        # AVD (`pm path com.android.car.settings`); the multi-line split shape
+        # here follows PackageManagerShellCommand.runPath()'s documented format
+        # (base first, then split_config.* APKs) — no split-installed app was
+        # available on that image to capture. An unknown package (or an
+        # unavailable user scope) exits 1 with NO output on that build — see
+        # PackagesService.get_package_path for how the terse case is classified.
+        self._pm_path_result = pm_path_result or CommandResult(
+            stdout=(
+                "package:/data/app/~~kQ7d==/com.example.thirdparty-Ab3c==/base.apk\n"
+                "package:/data/app/~~kQ7d==/com.example.thirdparty-Ab3c==/split_config.en.apk\n"
+                "package:/data/app/~~kQ7d==/com.example.thirdparty-Ab3c==/split_config.xxhdpi.apk\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=45.0,
         )
         # `adb install [flags] apk_path` — the well-documented, long-stable
         # "Performing Streamed Install" / "Success" wording modern adb uses
@@ -721,6 +740,8 @@ class FakeBackend:
             return self._setprop_result
         if command.startswith("pm list packages"):
             return self._list_packages_result
+        if command.startswith("pm path"):
+            return self._pm_path_result
         if command.startswith("pm uninstall"):
             return self._pm_uninstall_result
         if command.startswith("pm install-existing --user "):

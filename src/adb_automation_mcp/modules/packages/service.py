@@ -1,9 +1,10 @@
 """Domain logic for the packages module: installed-app management on a
 connected device — listing (`adb shell pm list packages`), installing
-(`adb install`), uninstalling (`adb shell pm uninstall`), and making an
+(`adb install`), uninstalling (`adb shell pm uninstall`), making an
 already-installed package available to another Android user
-(`adb shell pm install-existing`). Clearing app cache/data lives in a
-separate module (app_data); split APKs, APK bundles, APEX, staged
+(`adb shell pm install-existing`), and resolving a package's on-device APK
+paths (`adb shell pm path`, split APKs included). Clearing app cache/data
+lives in a separate module (app_data); APK bundles, APEX, staged
 installs/sessions, install-location management, and enable/disable/suspend
 are all deliberately out of scope for now.
 """
@@ -132,6 +133,31 @@ class InstallExistingResult(BaseModel):
 
     def summary(self) -> str:
         return f"Made {self.package_name} available for user {self.user_id} on {self.serial}."
+
+
+class PackagePathInfo(BaseModel):
+    """On-device APK paths for one installed package, from `adb shell pm path`.
+
+    `pm path` prints one "package:<path>" line per APK. A monolithically
+    installed app has a single path; a split-installed app has a base plus one
+    or more `split_config.*` APKs. paths is the authoritative list in pm's own
+    order; base_apk / split_apks are a best-effort split-out (base identified by
+    a trailing "/base.apk", else the first path, since pm lists the base first).
+    """
+
+    serial: str
+    package_name: str
+    user_id: int | None
+    paths: list[str]
+    base_apk: str | None
+    split_apks: list[str]
+
+    def summary(self) -> str:
+        scope = f" (user {self.user_id})" if self.user_id is not None else ""
+        n = len(self.paths)
+        if n == 1:
+            return f"{self.package_name} on {self.serial}{scope}: 1 APK."
+        return f"{self.package_name} on {self.serial}{scope}: {n} APKs (base + {len(self.split_apks)} split)."
 
 
 class PackagesService:
@@ -286,6 +312,94 @@ class PackagesService:
         _raise_for_install_existing_failure(serial, package_name, user_id, result)
         return InstallExistingResult(
             serial=serial, package_name=package_name, user_id=user_id, success=True, output=result.stdout
+        )
+
+    async def get_package_path(
+        self, serial: str, package_name: str, user_id: int | None = None
+    ) -> PackagePathInfo:
+        if not package_name.strip():
+            raise InvalidArgumentError("package_name must not be empty.", details={"serial": serial})
+        if user_id is not None and user_id < 0:
+            raise InvalidArgumentError(
+                "user_id must be a non-negative integer.",
+                details={"serial": serial, "user_id": user_id},
+            )
+
+        parts = ["pm", "path"]
+        if user_id is not None:
+            parts.extend(["--user", str(user_id)])
+        parts.append(shlex.quote(package_name))
+        result = await self._backend.shell(serial, " ".join(parts))
+
+        paths = _parse_pm_path(result.stdout)
+        if not paths:
+            # `pm path` gives no positive output for a package it can't resolve.
+            # On some builds it prints "Unknown package" / "Error: ... not
+            # found"; on others (e.g. the AOSP automotive image this was
+            # verified against) it just exits 1 with nothing at all. An
+            # unavailable --user scope produces the same empty result, so the
+            # message names both possibilities.
+            _raise_for_pm_path_failure(serial, package_name, user_id, result)
+            scope = f" for user {user_id}" if user_id is not None else ""
+            raise PackageNotFoundError(
+                f"pm path returned no APK path for {package_name}{scope} — the "
+                "package is not installed" + (", or not for that user." if user_id is not None else "."),
+                details={"serial": serial, "package_name": package_name, "user_id": user_id},
+            )
+
+        base_apk = next(
+            (p for p in paths if p.rsplit("/", 1)[-1] == "base.apk"), paths[0]
+        )
+        return PackagePathInfo(
+            serial=serial,
+            package_name=package_name,
+            user_id=user_id,
+            paths=paths,
+            base_apk=base_apk,
+            split_apks=[p for p in paths if p != base_apk],
+        )
+
+
+def _parse_pm_path(output: str) -> list[str]:
+    paths: list[str] = []
+    for raw in output.splitlines():
+        line = raw.strip()
+        if line.startswith("package:"):
+            candidate = line[len("package:") :].strip()
+            if candidate:
+                paths.append(candidate)
+    return paths
+
+
+def _raise_for_pm_path_failure(
+    serial: str, package_name: str, user_id: int | None, result: CommandResult
+) -> None:
+    message = (result.stderr or result.stdout).strip()
+    if _is_device_not_found(message):
+        raise DeviceNotFoundError(message, details={"serial": serial})
+    combined = f"{result.stdout}\n{result.stderr}"
+    if _MISSING_USER_RE.search(combined) is not None:
+        raise UserNotFoundError(
+            message or f"no such user {user_id}",
+            details={"serial": serial, "package_name": package_name, "user_id": user_id},
+        )
+    if "Unknown package" in combined or "not found" in combined:
+        raise PackageNotFoundError(
+            message or f"pm path could not find {package_name}",
+            details={"serial": serial, "package_name": package_name, "user_id": user_id},
+        )
+    # An explicit non-zero exit with some other wording is a real backend
+    # failure; a zero exit with empty output falls through to the caller's
+    # PackageNotFoundError.
+    if result.exit_code != 0 and message:
+        raise BackendError(
+            message,
+            details={
+                "serial": serial,
+                "package_name": package_name,
+                "user_id": user_id,
+                "exit_code": result.exit_code,
+            },
         )
 
 

@@ -18,6 +18,15 @@ from typing import Literal
 from pydantic import BaseModel
 
 from adb_automation_mcp.backend.protocol import AdbBackend, CommandResult
+from adb_automation_mcp.dumpsys_package import (
+    find_package_block,
+    first_value,
+    granted_permission_names,
+    package_present,
+    parse_bracket_list,
+    parse_kv,
+    parse_requested_permissions,
+)
 from adb_automation_mcp.errors import (
     AndroidRejectionError,
     BackendError,
@@ -469,7 +478,7 @@ class PackagesService:
         text = result.stdout
         # dumpsys exits 0 even for an unknown package; it says so in words, and
         # never emits a "Package [<name>]" block for one.
-        if f"Unable to find package: {package_name}" in text or f"Package [{package_name}]" not in text:
+        if not package_present(text, package_name):
             raise PackageNotFoundError(
                 f"dumpsys package has no record of {package_name} on {serial}.",
                 details={"serial": serial, "package_name": package_name},
@@ -577,46 +586,7 @@ def _raise_for_pm_path_failure(
         )
 
 
-_PKG_BLOCK_RE = re.compile(r"^  Package \[(?P<name>[^\]]+)\] \(")
-_KV_RE = re.compile(r"(\w+)=((?:\[[^\]]*\])|(?:\S+))")
-_GRANTED_TRUE_RE = re.compile(r"^\s+(?P<perm>[\w.]+): granted=true\b")
 _USER_LINE_RE = re.compile(r"^\s+User (?P<uid>\d+):\s")
-
-
-def _first_value(block: list[str], key: str) -> str | None:
-    prefix = f"{key}="
-    for raw in block:
-        stripped = raw.strip()
-        if stripped.startswith(prefix):
-            value = stripped[len(prefix) :].strip()
-            return value or None
-    return None
-
-
-def _parse_flags(block: list[str], key: str) -> list[str]:
-    for raw in block:
-        stripped = raw.strip()
-        if stripped.startswith(f"{key}=["):
-            inner = stripped[stripped.index("[") + 1 : stripped.rindex("]")] if "]" in stripped else ""
-            return inner.split()
-    return []
-
-
-def _parse_requested_permissions(block: list[str]) -> list[str]:
-    perms: list[str] = []
-    collecting = False
-    for raw in block:
-        stripped = raw.strip()
-        if stripped == "requested permissions:":
-            collecting = True
-            continue
-        if collecting:
-            # The list ends at the next "<something>:" section header or a
-            # non-permission-looking line.
-            if not stripped or stripped.endswith(":") or "=" in stripped:
-                break
-            perms.append(stripped)
-    return perms
 
 
 def _tri_bool(kv: dict[str, str], name: str) -> bool | None:
@@ -630,7 +600,7 @@ def _parse_user_states(block: list[str]) -> list[PackageUserInfo]:
         m = _USER_LINE_RE.match(raw)
         if m is None or "installed=" not in raw:
             continue
-        kv = dict(_KV_RE.findall(raw))
+        kv = parse_kv(raw)
         users.append(
             PackageUserInfo(
                 user_id=int(m.group("uid")),
@@ -644,30 +614,11 @@ def _parse_user_states(block: list[str]) -> list[PackageUserInfo]:
     return users
 
 
-def _parse_granted_permissions(full_text: str) -> list[str]:
-    # Scanned over the whole dumpsys output, not just the Package block: for a
-    # shared-uid package the runtime-permission grants live in a later
-    # "Shared users:" section. dumpsys package <pkg> is filtered to the one
-    # package, so every "granted=true" line here belongs to it.
-    seen: dict[str, None] = {}
-    for line in full_text.splitlines():
-        m = _GRANTED_TRUE_RE.match(line)
-        if m is not None:
-            seen.setdefault(m.group("perm"), None)
-    return list(seen)
-
-
 def _parse_dumpsys_package(serial: str, package_name: str, text: str) -> PackageInfo:
-    lines = text.splitlines()
-    start: int | None = None
-    for i, ln in enumerate(lines):
-        m = _PKG_BLOCK_RE.match(ln)
-        if m is not None and m.group("name") == package_name:
-            start = i
-            break
-    if start is None:
-        # The caller already checked for the block; treat a mismatch here as a
-        # malformed dump rather than crashing.
+    block = find_package_block(text, package_name)
+    if block is None:
+        # The caller already checked the package is present; treat a mismatch
+        # here as a malformed dump rather than crashing.
         return PackageInfo(
             serial=serial,
             package_name=package_name,
@@ -685,60 +636,44 @@ def _parse_dumpsys_package(serial: str, package_name: str, text: str) -> Package
             flags=[],
             users=[],
             requested_permissions=[],
-            granted_permissions=_parse_granted_permissions(text),
+            granted_permissions=granted_permission_names(text),
         )
-
-    end = len(lines)
-    for i in range(start + 1, len(lines)):
-        ln = lines[i]
-        if ln and not ln.startswith(" "):  # next column-0 section
-            end = i
-            break
-        if _PKG_BLOCK_RE.match(ln):  # another package block
-            end = i
-            break
-    block = lines[start:end]
 
     version_code: int | None = None
     min_sdk: int | None = None
     target_sdk: int | None = None
-    version_line = _first_value(block, "versionCode")
-    if version_line is not None:
-        # "versionCode=4500 minSdk=24 targetSdk=34" — _first_value returns only
-        # the first whitespace-delimited token, so re-scan the raw line for the
-        # siblings.
-        for raw in block:
-            if raw.strip().startswith("versionCode="):
-                kv = dict(_KV_RE.findall(raw))
-                version_code = _safe_int(kv.get("versionCode"))
-                min_sdk = _safe_int(kv.get("minSdk"))
-                target_sdk = _safe_int(kv.get("targetSdk"))
-                break
+    for raw in block:
+        if raw.strip().startswith("versionCode="):
+            kv = parse_kv(raw)
+            version_code = _safe_int(kv.get("versionCode"))
+            min_sdk = _safe_int(kv.get("minSdk"))
+            target_sdk = _safe_int(kv.get("targetSdk"))
+            break
 
-    installer = _first_value(block, "installerPackageName")
+    installer = first_value(block, "installerPackageName")
     if installer == "null":
         installer = None
 
-    flags = _parse_flags(block, "flags") or _parse_flags(block, "pkgFlags")
+    flags = parse_bracket_list(block, "flags") or parse_bracket_list(block, "pkgFlags")
 
     return PackageInfo(
         serial=serial,
         package_name=package_name,
-        uid=_safe_int(_first_value(block, "appId") or _first_value(block, "userId")),
+        uid=_safe_int(first_value(block, "appId") or first_value(block, "userId")),
         version_code=version_code,
-        version_name=_first_value(block, "versionName"),
+        version_name=first_value(block, "versionName"),
         min_sdk=min_sdk,
         target_sdk=target_sdk,
-        code_path=_first_value(block, "codePath"),
-        data_dir=_first_value(block, "dataDir"),
+        code_path=first_value(block, "codePath"),
+        data_dir=first_value(block, "dataDir"),
         installer_package_name=installer,
-        first_install_time=_first_value(block, "firstInstallTime"),
-        last_update_time=_first_value(block, "lastUpdateTime"),
+        first_install_time=first_value(block, "firstInstallTime"),
+        last_update_time=first_value(block, "lastUpdateTime"),
         is_system="SYSTEM" in flags,
         flags=flags,
         users=_parse_user_states(block),
-        requested_permissions=_parse_requested_permissions(block),
-        granted_permissions=_parse_granted_permissions(text),
+        requested_permissions=parse_requested_permissions(block),
+        granted_permissions=granted_permission_names(text),
     )
 
 

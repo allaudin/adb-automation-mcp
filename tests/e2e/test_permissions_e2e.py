@@ -326,3 +326,64 @@ async def test_revoke_permission_tool_is_registered() -> None:
         names = {tool.name for tool in await client.list_tools()}
 
     assert "revoke_permission" in names
+
+
+# --- get_package_permissions ----------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_package_permissions_tool_round_trips_and_serializes_nested_shape() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "get_package_permissions",
+            {"serial": "emulator-5554", "package_name": "com.example.thirdparty"},
+        )
+
+    assert result.data.status == "success"
+    d = result.data.data
+    assert "android.permission.CAMERA" in d.requested_permissions
+    assert d.declared_permissions[0].name == "com.example.thirdparty.CUSTOM"
+    assert [p.name for p in d.install_permissions] == [
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+    ]
+    assert d.runtime_permissions[0].user_id == 0
+    cam = next(p for p in d.runtime_permissions[0].permissions if p.name.endswith("CAMERA"))
+    assert cam.granted is True
+    assert cam.flags == ["USER_SET"]
+
+
+@pytest.mark.asyncio
+async def test_get_package_permissions_tool_unknown_package_serializes_as_package_not_found() -> None:
+    mcp = _build_test_server(
+        FakeBackend(
+            dumpsys_package_result=CommandResult(
+                stdout="Unable to find package: com.zzz.nope\n",
+                stderr="",
+                exit_code=0,
+                duration_ms=5.0,
+            )
+        )
+    )
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "get_package_permissions",
+            {"serial": "emulator-5554", "package_name": "com.zzz.nope"},
+        )
+
+    assert result.data.status == "error"
+    assert result.data.error is not None
+    assert result.data.error.code == "PACKAGE_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_get_package_permissions_tool_is_registered() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        names = {tool.name for tool in await client.list_tools()}
+
+    assert "get_package_permissions" in names

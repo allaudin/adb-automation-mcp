@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from adb_automation_mcp.modules.packages.service import PackagesService
 from adb_automation_mcp.modules.packages.tools import (
+    get_package_info,
     get_package_path,
     install_apk,
     install_existing_for_user,
@@ -24,6 +25,7 @@ MODULE = ModuleManifest(
         uninstall_package,
         install_existing_for_user,
         get_package_path,
+        get_package_info,
     ],
     resources=[],
 )

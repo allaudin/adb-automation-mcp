@@ -14,6 +14,7 @@ from adb_automation_mcp.modules.packages.service import (
     InstallExistingResult,
     InstallResult,
     PackageFilter,
+    PackageInfo,
     PackageList,
     PackagePathInfo,
     PackagesService,
@@ -355,3 +356,79 @@ async def get_package_path(
     services = cast("dict[str, object]", ctx.lifespan_context["services"])
     packages = cast(PackagesService, services["packages"])
     return await packages.get_package_path(serial, package_name, user_id=user_id)
+
+
+@category("read")
+async def get_package_info(ctx: Context, serial: str, package_name: str) -> PackageInfo:
+    """Curated snapshot of an installed package: `adb shell dumpsys package <pkg>`.
+
+    Parses the stable, automation-relevant fields out of dumpsys — version, UID,
+    install/update times, code path, data dir, installer, flags, per-user
+    enabled/installed state, and requested vs. granted permissions — instead of
+    returning the (very large, version-variable) raw dump. Fields dumpsys
+    doesn't report on a given Android version come back null / empty, never an
+    error.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+        package_name: The application id to inspect, e.g. "com.example.app".
+
+    Returns:
+        A PackageInfo: package_name, uid, version_code / version_name,
+        min_sdk / target_sdk, code_path, data_dir, installer_package_name,
+        first_install_time / last_update_time, is_system, flags, users (per
+        Android user: installed, enabled_state, stopped, hidden, suspended),
+        requested_permissions, and granted_permissions (every permission with
+        granted=true anywhere in the dump — install-time and runtime, across
+        users).
+
+    Error handling:
+        An empty package_name raises INVALID_ARGUMENT before any adb call. An
+        unknown serial raises DEVICE_NOT_FOUND; an unreachable adb binary raises
+        ADB_UNAVAILABLE. A package dumpsys has no record of raises
+        PACKAGE_NOT_FOUND (dumpsys says "Unable to find package" and still exits
+        0 — this tool turns that into the error).
+
+    Example:
+        Called with serial="emulator-5554", package_name="com.example.thirdparty".
+        A typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "com.example.thirdparty 4.5.0 (user) on emulator-5554: 3 granted / 4 requested permissions, 1 user(s).",
+          "data": {
+            "serial": "emulator-5554",
+            "package_name": "com.example.thirdparty",
+            "uid": 10234,
+            "version_code": 4500,
+            "version_name": "4.5.0",
+            "min_sdk": 24,
+            "target_sdk": 34,
+            "code_path": "/data/app/~~kQ7d==/com.example.thirdparty-Ab3c==",
+            "data_dir": "/data/user/0/com.example.thirdparty",
+            "installer_package_name": "com.android.vending",
+            "first_install_time": "2026-09-01 12:00:00",
+            "last_update_time": "2026-09-03 08:30:00",
+            "is_system": false,
+            "flags": ["HAS_CODE", "ALLOW_CLEAR_USER_DATA", "ALLOW_BACKUP"],
+            "users": [
+              {"user_id": 0, "installed": true, "enabled_state": "enabled",
+               "stopped": false, "hidden": false, "suspended": false}
+            ],
+            "requested_permissions": [
+              "android.permission.INTERNET", "android.permission.ACCESS_NETWORK_STATE",
+              "android.permission.CAMERA", "android.permission.ACCESS_FINE_LOCATION"
+            ],
+            "granted_permissions": [
+              "android.permission.INTERNET", "android.permission.ACCESS_NETWORK_STATE",
+              "android.permission.CAMERA"
+            ]
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    packages = cast(PackagesService, services["packages"])
+    return await packages.get_package_info(serial, package_name)

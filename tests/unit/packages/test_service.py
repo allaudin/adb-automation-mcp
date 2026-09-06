@@ -18,6 +18,7 @@ from adb_automation_mcp.errors import (
     UserNotFoundError,
 )
 from adb_automation_mcp.modules.packages.service import (
+    PackageInfo,
     PackageList,
     PackagePathInfo,
     PackagesService,
@@ -765,3 +766,187 @@ def test_package_path_info_summary_variants() -> None:
     ).summary()
     assert "2 APKs" in many
     assert "user 10" in many
+
+
+# --- get_package_info ------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_package_info__constructs_dumpsys_command_and_parses_default_fixture() -> None:
+    backend = _ShellRecordingBackend()
+    service = PackagesService(backend)
+
+    info = await service.get_package_info("emulator-5554", "com.example.thirdparty")
+
+    assert backend.last_shell_command == "dumpsys package com.example.thirdparty"
+    assert isinstance(info, PackageInfo)
+    assert info.uid == 10234
+    assert info.version_code == 4500
+    assert info.version_name == "4.5.0"
+    assert info.min_sdk == 24
+    assert info.target_sdk == 34
+    assert info.code_path == "/data/app/~~kQ7d==/com.example.thirdparty-Ab3c=="
+    assert info.data_dir == "/data/user/0/com.example.thirdparty"
+    assert info.installer_package_name == "com.android.vending"
+    assert info.first_install_time == "2026-09-01 12:00:00"
+    assert info.last_update_time == "2026-09-03 08:30:00"
+    assert info.is_system is False
+    assert info.flags == ["HAS_CODE", "ALLOW_CLEAR_USER_DATA", "ALLOW_BACKUP"]
+
+
+@pytest.mark.asyncio
+async def test_get_package_info__parses_per_user_state_and_enabled_enum() -> None:
+    service = PackagesService(FakeBackend())
+
+    info = await service.get_package_info("emulator-5554", "com.example.thirdparty")
+
+    assert len(info.users) == 1
+    u = info.users[0]
+    assert u.user_id == 0
+    assert u.installed is True
+    assert u.enabled_state == "enabled"  # "enabled=1"
+    assert u.stopped is False
+    assert u.hidden is False
+    assert u.suspended is False
+
+
+@pytest.mark.asyncio
+async def test_get_package_info__requested_vs_granted_permissions() -> None:
+    service = PackagesService(FakeBackend())
+
+    info = await service.get_package_info("emulator-5554", "com.example.thirdparty")
+
+    assert info.requested_permissions == [
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.CAMERA",
+        "android.permission.ACCESS_FINE_LOCATION",
+    ]
+    # install perms (INTERNET, ACCESS_NETWORK_STATE) + runtime perm CAMERA are
+    # granted=true; ACCESS_FINE_LOCATION is granted=false → excluded.
+    assert info.granted_permissions == [
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.CAMERA",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_package_info__system_package_flags_set_is_system() -> None:
+    backend = FakeBackend(
+        dumpsys_package_result=CommandResult(
+            stdout=(
+                "Packages:\n"
+                "  Package [com.android.systemui] (ff00):\n"
+                "    appId=10050\n"
+                "    versionCode=34 minSdk=34 targetSdk=34\n"
+                "    versionName=14\n"
+                "    flags=[ SYSTEM HAS_CODE ]\n"
+                "    lastUpdateTime=2026-01-01 00:00:00\n"
+                "    installerPackageName=null\n"
+                "    User 0: installed=true hidden=false suspended=false stopped=false enabled=0\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=10.0,
+        )
+    )
+    service = PackagesService(backend)
+
+    info = await service.get_package_info("emulator-5554", "com.android.systemui")
+
+    assert info.is_system is True
+    assert info.installer_package_name is None
+    assert info.users[0].enabled_state == "default"  # enabled=0
+
+
+@pytest.mark.asyncio
+async def test_get_package_info__unknown_package_raises_package_not_found() -> None:
+    backend = FakeBackend(
+        dumpsys_package_result=CommandResult(
+            stdout="Unable to find package: com.zzz.nope\n", stderr="", exit_code=0, duration_ms=8.0
+        )
+    )
+    service = PackagesService(backend)
+
+    with pytest.raises(PackageNotFoundError):
+        await service.get_package_info("emulator-5554", "com.zzz.nope")
+
+
+@pytest.mark.asyncio
+async def test_get_package_info__empty_package_name_rejected_before_backend() -> None:
+    backend = _ShellRecordingBackend()
+    service = PackagesService(backend)
+
+    with pytest.raises(InvalidArgumentError):
+        await service.get_package_info("emulator-5554", "  ")
+
+    assert backend.last_shell_command is None
+
+
+@pytest.mark.asyncio
+async def test_get_package_info__unknown_serial_raises_device_not_found() -> None:
+    backend = FakeBackend(
+        dumpsys_package_result=CommandResult(
+            stdout="", stderr="adb: device 'bogus' not found\n", exit_code=1, duration_ms=8.0
+        )
+    )
+    service = PackagesService(backend)
+
+    with pytest.raises(DeviceNotFoundError):
+        await service.get_package_info("bogus", "com.example.app")
+
+
+@pytest.mark.asyncio
+async def test_get_package_info__malformed_block_does_not_crash() -> None:
+    # Header present (so not "not found"), but the block body is junk.
+    backend = FakeBackend(
+        dumpsys_package_result=CommandResult(
+            stdout="Packages:\n  Package [com.example.app] (aa):\n    <<< garbage >>>\n",
+            stderr="",
+            exit_code=0,
+            duration_ms=8.0,
+        )
+    )
+    service = PackagesService(backend)
+
+    info = await service.get_package_info("emulator-5554", "com.example.app")
+
+    assert info.package_name == "com.example.app"
+    assert info.version_code is None
+    assert info.flags == []
+    assert info.users == []
+    assert info.requested_permissions == []
+
+
+@pytest.mark.asyncio
+async def test_get_package_info__adb_unavailable_propagates() -> None:
+    service = PackagesService(FakeBackend(unavailable=True))
+
+    with pytest.raises(AdbUnavailableError):
+        await service.get_package_info("emulator-5554", "com.example.app")
+
+
+def test_package_info_summary_mentions_version_kind_and_counts() -> None:
+    s = PackageInfo(
+        serial="emulator-5554",
+        package_name="com.x",
+        uid=1,
+        version_code=5,
+        version_name="1.2.3",
+        min_sdk=None,
+        target_sdk=None,
+        code_path=None,
+        data_dir=None,
+        installer_package_name=None,
+        first_install_time=None,
+        last_update_time=None,
+        is_system=True,
+        flags=["SYSTEM"],
+        users=[],
+        requested_permissions=["a", "b"],
+        granted_permissions=["a"],
+    ).summary()
+    assert "1.2.3" in s
+    assert "system" in s
+    assert "1 granted / 2 requested" in s

@@ -11,7 +11,11 @@ from typing import cast
 
 from fastmcp import Context
 
-from adb_automation_mcp.modules.permissions.service import GrantPermissionResult, PermissionsService
+from adb_automation_mcp.modules.permissions.service import (
+    GrantPermissionResult,
+    PermissionsService,
+    RevokePermissionResult,
+)
 from adb_automation_mcp.registry import category
 
 
@@ -76,3 +80,67 @@ async def grant_permission(
     services = cast("dict[str, object]", ctx.lifespan_context["services"])
     permissions = cast(PermissionsService, services["permissions"])
     return await permissions.grant_permission(serial, package_name, permission, user_id=user_id)
+
+
+@category("write")
+async def revoke_permission(
+    ctx: Context, serial: str, package_name: str, permission: str, user_id: int | None = None
+) -> RevokePermissionResult:
+    """Revoke one Android runtime permission from a package: `adb shell pm revoke`.
+
+    The counterpart to grant_permission. Idempotent — revoking a permission
+    the package doesn't currently hold (or doesn't even request) is a
+    success, not an error, since the intended end state is reached either way.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+        package_name: The package to revoke the permission from, e.g.
+            "com.example.app".
+        permission: The fully-qualified runtime permission to revoke, e.g.
+            "android.permission.CAMERA".
+        user_id: Revoke for one specific Android user (`--user`, see
+            list_users). Omit to use pm's default user. On multi-user
+            devices a package is often only installed for a secondary user,
+            in which case this must name that user or the revoke fails with
+            PACKAGE_NOT_FOUND.
+
+    Returns:
+        The serial, package_name, permission, and user_id the revoke was
+        issued for, plus success (always True — see Error handling) and the
+        raw `pm revoke` output (normally empty on success).
+
+    Error handling:
+        An empty package_name or permission, or a negative user_id, raises
+        INVALID_ARGUMENT before any adb call. An unknown serial or
+        unresponsive adb binary raises DEVICE_NOT_FOUND/ADB_UNAVAILABLE. A
+        package_name not installed (for the targeted user) raises
+        PACKAGE_NOT_FOUND. A permission unknown to the platform raises
+        PERMISSION_NOT_DECLARED. A permission that isn't a runtime/dangerous
+        permission raises NON_RUNTIME_PERMISSION. A policy-fixed permission
+        state raises PERMISSION_POLICY_RESTRICTED. A caller lacking the
+        rights raises PERMISSION_DENIED. Any other `pm`/adb failure raises
+        BACKEND_ERROR.
+
+    Example:
+        Called with serial="emulator-5554", package_name="com.example.app",
+        permission="android.permission.CAMERA". A typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "Revoked android.permission.CAMERA from com.example.app on emulator-5554.",
+          "data": {
+            "serial": "emulator-5554",
+            "package_name": "com.example.app",
+            "permission": "android.permission.CAMERA",
+            "user_id": null,
+            "success": true,
+            "output": ""
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    permissions = cast(PermissionsService, services["permissions"])
+    return await permissions.revoke_permission(serial, package_name, permission, user_id=user_id)

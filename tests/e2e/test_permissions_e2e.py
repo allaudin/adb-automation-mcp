@@ -240,3 +240,89 @@ async def test_grant_permission_tool_adb_failure_returns_device_not_found_error(
     assert result.data.status == "error"
     assert result.data.error is not None
     assert result.data.error.code == "DEVICE_NOT_FOUND"
+
+
+# --- revoke_permission ------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_revoke_permission_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "revoke_permission",
+            {
+                "serial": "emulator-5554",
+                "package_name": "com.example.app",
+                "permission": "android.permission.CAMERA",
+            },
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.permission == "android.permission.CAMERA"
+    assert result.data.data.success is True
+
+
+@pytest.mark.asyncio
+async def test_revoke_permission_tool_accepts_user_id() -> None:
+    captured: dict[str, str] = {}
+
+    class RecordingBackend(FakeBackend):
+        async def shell(self, serial: str, command: str) -> CommandResult:
+            captured["command"] = command
+            return await super().shell(serial, command)
+
+    mcp = _build_test_server(RecordingBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "revoke_permission",
+            {
+                "serial": "emulator-5554",
+                "package_name": "com.example.app",
+                "permission": "android.permission.CAMERA",
+                "user_id": 10,
+            },
+        )
+
+    assert result.data.status == "success"
+    assert captured["command"] == "pm revoke --user 10 com.example.app android.permission.CAMERA"
+
+
+@pytest.mark.asyncio
+async def test_revoke_permission_tool_package_not_found_returns_error_envelope() -> None:
+    mcp = _build_test_server(
+        FakeBackend(
+            revoke_permission_result=CommandResult(
+                stdout="Failure [package not found]\nError: package not found\n",
+                stderr="",
+                exit_code=1,
+                duration_ms=5.0,
+            )
+        )
+    )
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "revoke_permission",
+            {
+                "serial": "emulator-5554",
+                "package_name": "com.zzz.nope",
+                "permission": "android.permission.CAMERA",
+            },
+        )
+
+    assert result.data.status == "error"
+    assert result.data.error is not None
+    assert result.data.error.code == "PACKAGE_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_revoke_permission_tool_is_registered() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        names = {tool.name for tool in await client.list_tools()}
+
+    assert "revoke_permission" in names

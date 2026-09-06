@@ -9,15 +9,20 @@ import pytest
 from adb_automation_mcp.backend.protocol import CommandResult
 from adb_automation_mcp.backend.testing import FakeBackend
 from adb_automation_mcp.errors import (
+    AdbUnavailableError,
     BackendError,
     DeviceNotFoundError,
+    InvalidArgumentError,
     NonRuntimePermissionError,
     PackageNotFoundError,
     PermissionDeniedError,
     PermissionNotDeclaredError,
     PermissionPolicyRestrictedError,
 )
-from adb_automation_mcp.modules.permissions.service import PermissionsService
+from adb_automation_mcp.modules.permissions.service import (
+    PermissionsService,
+    RevokePermissionResult,
+)
 
 
 @pytest.mark.asyncio
@@ -205,3 +210,174 @@ async def test_grant_permission__unclassified_failure_raises_backend_error() -> 
 
     with pytest.raises(BackendError):
         await service.grant_permission("emulator-5554", "com.example.app", "android.permission.CAMERA")
+
+
+# --- revoke_permission ------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_revoke_permission__succeeds_with_no_stdout() -> None:
+    service = PermissionsService(FakeBackend())
+
+    result = await service.revoke_permission(
+        "emulator-5554", "com.example.app", "android.permission.CAMERA"
+    )
+
+    assert isinstance(result, RevokePermissionResult)
+    assert result.success is True
+    assert result.output == ""
+    assert result.permission == "android.permission.CAMERA"
+
+
+@pytest.mark.asyncio
+async def test_revoke_permission__constructs_pm_revoke_command_with_user_flag() -> None:
+    captured: dict[str, str] = {}
+
+    class RecordingBackend(FakeBackend):
+        async def shell(self, serial: str, command: str) -> CommandResult:
+            captured["command"] = command
+            return await super().shell(serial, command)
+
+    service = PermissionsService(RecordingBackend())
+
+    await service.revoke_permission(
+        "emulator-5554", "com.example.app", "android.permission.CAMERA", user_id=10
+    )
+
+    assert captured["command"] == "pm revoke --user 10 com.example.app android.permission.CAMERA"
+
+
+@pytest.mark.asyncio
+async def test_revoke_permission__omits_user_flag_when_not_given() -> None:
+    captured: dict[str, str] = {}
+
+    class RecordingBackend(FakeBackend):
+        async def shell(self, serial: str, command: str) -> CommandResult:
+            captured["command"] = command
+            return await super().shell(serial, command)
+
+    service = PermissionsService(RecordingBackend())
+
+    await service.revoke_permission("emulator-5554", "com.example.app", "android.permission.CAMERA")
+
+    assert captured["command"] == "pm revoke com.example.app android.permission.CAMERA"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "pkg,perm", [("", "android.permission.CAMERA"), ("com.example.app", "  ")]
+)
+async def test_revoke_permission__empty_args_rejected_before_backend(pkg: str, perm: str) -> None:
+    captured: dict[str, str] = {}
+
+    class RecordingBackend(FakeBackend):
+        async def shell(self, serial: str, command: str) -> CommandResult:
+            captured["command"] = command
+            return await super().shell(serial, command)
+
+    service = PermissionsService(RecordingBackend())
+
+    with pytest.raises(InvalidArgumentError):
+        await service.revoke_permission("emulator-5554", pkg, perm)
+
+    assert "command" not in captured
+
+
+@pytest.mark.asyncio
+async def test_revoke_permission__negative_user_id_rejected_before_backend() -> None:
+    service = PermissionsService(FakeBackend())
+
+    with pytest.raises(InvalidArgumentError):
+        await service.revoke_permission(
+            "emulator-5554", "com.example.app", "android.permission.CAMERA", user_id=-1
+        )
+
+
+@pytest.mark.asyncio
+async def test_revoke_permission__failure_marker_on_zero_exit_is_still_a_failure() -> None:
+    # Verified live: `pm revoke` can print "Failure [package not found]" with
+    # exit 0 when the package resolves to a different Android user.
+    backend = FakeBackend(
+        revoke_permission_result=CommandResult(
+            stdout="Failure [package not found]\nError: package not found\n",
+            stderr="",
+            exit_code=0,
+            duration_ms=5.0,
+        )
+    )
+    service = PermissionsService(backend)
+
+    with pytest.raises(PackageNotFoundError):
+        await service.revoke_permission("emulator-5554", "com.example.app", "android.permission.CAMERA")
+
+
+@pytest.mark.asyncio
+async def test_revoke_permission__non_runtime_permission_raises_non_runtime_permission() -> None:
+    backend = FakeBackend(
+        revoke_permission_result=CommandResult(
+            stdout="",
+            stderr=(
+                "\nException occurred while executing 'revoke':\n"
+                "java.lang.SecurityException: Permission android.permission.INTERNET requested by "
+                "package com.example.app is not a changeable permission type\n"
+            ),
+            exit_code=255,
+            duration_ms=5.0,
+        )
+    )
+    service = PermissionsService(backend)
+
+    with pytest.raises(NonRuntimePermissionError):
+        await service.revoke_permission("emulator-5554", "com.example.app", "android.permission.INTERNET")
+
+
+@pytest.mark.asyncio
+async def test_revoke_permission__unknown_permission_raises_permission_not_declared() -> None:
+    backend = FakeBackend(
+        revoke_permission_result=CommandResult(
+            stdout="",
+            stderr=(
+                "\nException occurred while executing 'revoke':\n"
+                "java.lang.IllegalArgumentException: Unknown permission android.permission.NOT_REAL\n"
+            ),
+            exit_code=255,
+            duration_ms=5.0,
+        )
+    )
+    service = PermissionsService(backend)
+
+    with pytest.raises(PermissionNotDeclaredError):
+        await service.revoke_permission("emulator-5554", "com.example.app", "android.permission.NOT_REAL")
+
+
+@pytest.mark.asyncio
+async def test_revoke_permission__unknown_serial_raises_device_not_found() -> None:
+    backend = FakeBackend(
+        revoke_permission_result=CommandResult(
+            stdout="", stderr="adb: device 'bogus' not found\n", exit_code=1, duration_ms=5.0
+        )
+    )
+    service = PermissionsService(backend)
+
+    with pytest.raises(DeviceNotFoundError):
+        await service.revoke_permission("bogus", "com.example.app", "android.permission.CAMERA")
+
+
+@pytest.mark.asyncio
+async def test_revoke_permission__adb_unavailable_propagates() -> None:
+    service = PermissionsService(FakeBackend(unavailable=True))
+
+    with pytest.raises(AdbUnavailableError):
+        await service.revoke_permission("emulator-5554", "com.example.app", "android.permission.CAMERA")
+
+
+def test_revoke_permission_result_summary() -> None:
+    s = RevokePermissionResult(
+        serial="emulator-5554",
+        package_name="com.x",
+        permission="android.permission.CAMERA",
+        user_id=None,
+        success=True,
+        output="",
+    ).summary()
+    assert s == "Revoked android.permission.CAMERA from com.x on emulator-5554."

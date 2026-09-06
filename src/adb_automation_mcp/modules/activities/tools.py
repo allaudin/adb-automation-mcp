@@ -10,7 +10,11 @@ from typing import cast
 
 from fastmcp import Context
 
-from adb_automation_mcp.modules.activities.service import ActivitiesService, StartActivityResult
+from adb_automation_mcp.modules.activities.service import (
+    ActivitiesService,
+    ResolvedActivity,
+    StartActivityResult,
+)
 from adb_automation_mcp.registry import category
 
 
@@ -104,4 +108,87 @@ async def start_activity(
         user_id=user_id,
         display_id=display_id,
         wait_for_launch=wait_for_launch,
+    )
+
+
+@category("read")
+async def resolve_activity(
+    ctx: Context,
+    serial: str,
+    action: str | None = None,
+    data_uri: str | None = None,
+    mime_type: str | None = None,
+    categories: list[str] | None = None,
+    component: str | None = None,
+    package_name: str | None = None,
+    user_id: int | None = None,
+) -> ResolvedActivity:
+    """Resolve which Activity would handle an Intent, without launching it: `cmd package resolve-activity`.
+
+    The safe way to find out what `start_activity` (or the system) would pick
+    for a given Intent — nothing is started. Describe the Intent with the typed
+    fields below (at least one is required); they map to the same `-a`/`-d`/
+    `-t`/`-c`/`-n`/`-p` options Android's own tooling uses.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+        action: Intent action, e.g. "android.intent.action.VIEW" (`-a`).
+        data_uri: Intent data URI, e.g. "https://example.com" (`-d`).
+        mime_type: Explicit MIME type, e.g. "text/plain" (`-t`).
+        categories: Intent categories, e.g. ["android.intent.category.HOME"]
+            (`-c`, repeatable).
+        component: An explicit "package/class" component to resolve (`-n`) —
+            resolution still confirms it exists and is enabled.
+        package_name: Constrain resolution to one package (`-p`).
+        user_id: Resolve as one Android user (`--user`, see list_users).
+
+    Returns:
+        resolved (False for the normal "no activity handles this" outcome, not
+        an error), and when resolved: component ("package/class"), its
+        package_name and activity_class, is_default (whether the winner is a
+        registered default handler vs. the system resolver), the match hex, and
+        priority.
+
+    Error handling:
+        Specifying no Intent fields at all, or a negative user_id, raises
+        INVALID_ARGUMENT before any adb call. A malformed component string
+        (not "package/class" shape) also raises INVALID_ARGUMENT — Android's
+        Intent parser rejects it. An unknown serial raises DEVICE_NOT_FOUND;
+        an unreachable adb binary raises ADB_UNAVAILABLE. A build whose
+        `resolve-activity` lacks an option used here raises BACKEND_ERROR.
+
+    Example:
+        Called with serial="emulator-5554",
+        action="android.intent.action.MAIN",
+        categories=["android.intent.category.HOME"]. A typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "com.android.car.carlauncher/.CarLauncher resolves that intent on emulator-5554 (default).",
+          "data": {
+            "serial": "emulator-5554",
+            "resolved": true,
+            "component": "com.android.car.carlauncher/.CarLauncher",
+            "package_name": "com.android.car.carlauncher",
+            "activity_class": ".CarLauncher",
+            "is_default": true,
+            "match": "0x108000",
+            "priority": 0
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    activities = cast(ActivitiesService, services["activities"])
+    return await activities.resolve_activity(
+        serial,
+        action=action,
+        data_uri=data_uri,
+        mime_type=mime_type,
+        categories=categories,
+        component=component,
+        package_name=package_name,
+        user_id=user_id,
     )

@@ -13,6 +13,8 @@ from fastmcp import Context
 from adb_automation_mcp.modules.packages.service import (
     InstallExistingResult,
     InstallResult,
+    PackageEnabledState,
+    PackageEnabledStateResult,
     PackageFilter,
     PackageInfo,
     PackageList,
@@ -432,3 +434,76 @@ async def get_package_info(ctx: Context, serial: str, package_name: str) -> Pack
     services = cast("dict[str, object]", ctx.lifespan_context["services"])
     packages = cast(PackagesService, services["packages"])
     return await packages.get_package_info(serial, package_name)
+
+
+@category("write")
+async def set_package_enabled_state(
+    ctx: Context,
+    serial: str,
+    package_name: str,
+    state: PackageEnabledState,
+    component: str | None = None,
+    user_id: int | None = None,
+) -> PackageEnabledStateResult:
+    """Enable or disable an app, or one of its components: `adb shell pm enable|disable|...`.
+
+    Use this to turn a package (or a specific Activity / Service / Receiver /
+    Provider) on or off for automation — e.g. disable a receiver, observe the
+    behavior change, then set it back to "default". Reversible: "default" clears
+    any override this tool (or anything else) set.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+        package_name: The application id, e.g. "com.example.app".
+        state: The state to set. One of "enabled", "disabled", "disabled_user"
+            (disable only for the given/current user, the safe choice for an
+            app package — plain "disabled" is often refused for system apps),
+            or "default" (clear any override).
+        component: Optional class name of a single component to target instead
+            of the whole package — either relative (".MyReceiver") or fully
+            qualified ("com.example.app.MyReceiver"). No spaces or "/".
+        user_id: Apply for one Android user (`--user ID`, see list_users). Omit
+            for pm's default/current user.
+
+    Returns:
+        The serial, package_name, component (null for a whole-package change),
+        the resolved target string ("pkg" or "pkg/component"), user_id,
+        requested_state, and new_state — the state pm confirmed, normalized to
+        the same names as the request ("disabled_user", not "disabled-user").
+
+    Error handling:
+        An empty package_name, unknown state, negative user_id, or malformed
+        component raises INVALID_ARGUMENT before any adb call. An unknown serial
+        raises DEVICE_NOT_FOUND; an unreachable adb binary raises
+        ADB_UNAVAILABLE. A package pm doesn't know raises PACKAGE_NOT_FOUND. pm
+        refusing the change — a protected/system package, or a component the
+        shell isn't allowed to touch (pm reports an absent component the same
+        way) — raises PERMISSION_DENIED.
+
+    Example:
+        Called with serial="emulator-5554", package_name="com.example.app",
+        state="disabled_user". A typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "com.example.app on emulator-5554 is now 'disabled_user'.",
+          "data": {
+            "serial": "emulator-5554",
+            "package_name": "com.example.app",
+            "component": null,
+            "target": "com.example.app",
+            "user_id": null,
+            "requested_state": "disabled_user",
+            "new_state": "disabled_user",
+            "success": true
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    packages = cast(PackagesService, services["packages"])
+    return await packages.set_package_enabled_state(
+        serial, package_name, state, component=component, user_id=user_id
+    )

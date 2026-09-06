@@ -15,9 +15,11 @@ from adb_automation_mcp.errors import (
     DeviceNotFoundError,
     InvalidArgumentError,
     PackageNotFoundError,
+    PermissionDeniedError,
     UserNotFoundError,
 )
 from adb_automation_mcp.modules.packages.service import (
+    PackageEnabledStateResult,
     PackageInfo,
     PackageList,
     PackagePathInfo,
@@ -950,3 +952,210 @@ def test_package_info_summary_mentions_version_kind_and_counts() -> None:
     assert "1.2.3" in s
     assert "system" in s
     assert "1 granted / 2 requested" in s
+
+
+# --- set_package_enabled_state -------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "state,subcmd,expect_new",
+    [
+        ("enabled", "enable", "enabled"),
+        ("disabled", "disable", "disabled"),
+        ("disabled_user", "disable-user", "disabled_user"),
+        ("default", "default-state", "default"),
+    ],
+)
+async def test_set_package_enabled_state__each_enum_maps_to_pm_subcommand(
+    state: str, subcmd: str, expect_new: str
+) -> None:
+    backend = _ShellRecordingBackend()
+    service = PackagesService(backend)
+
+    result = await service.set_package_enabled_state("emulator-5554", "com.example.app", state)  # type: ignore[arg-type]
+
+    assert backend.last_shell_command == f"pm {subcmd} com.example.app"
+    assert isinstance(result, PackageEnabledStateResult)
+    assert result.requested_state == state
+    assert result.new_state == expect_new
+    assert result.target == "com.example.app"
+    assert result.component is None
+
+
+@pytest.mark.asyncio
+async def test_set_package_enabled_state__component_builds_pkg_slash_component_target() -> None:
+    backend = _ShellRecordingBackend()
+    service = PackagesService(backend)
+
+    result = await service.set_package_enabled_state(
+        "emulator-5554", "com.example.app", "disabled_user", component=".MyReceiver"
+    )
+
+    assert backend.last_shell_command == "pm disable-user com.example.app/.MyReceiver"
+    assert result.component == ".MyReceiver"
+    assert result.target == "com.example.app/.MyReceiver"
+
+
+@pytest.mark.asyncio
+async def test_set_package_enabled_state__user_scope_adds_user_flag_before_target() -> None:
+    backend = _ShellRecordingBackend()
+    service = PackagesService(backend)
+
+    await service.set_package_enabled_state(
+        "emulator-5554", "com.example.app", "enabled", user_id=10
+    )
+
+    assert backend.last_shell_command == "pm enable --user 10 com.example.app"
+
+
+@pytest.mark.asyncio
+async def test_set_package_enabled_state__older_build_default_falls_back_to_pm_default() -> None:
+    calls: list[str] = []
+
+    class _Backend(FakeBackend):
+        async def shell(self, serial: str, command: str) -> CommandResult:
+            calls.append(command)
+            if command.startswith("pm default-state"):
+                return CommandResult(
+                    stdout="Unknown command: default-state\n", stderr="", exit_code=255, duration_ms=5.0
+                )
+            return await super().shell(serial, command)
+
+    service = PackagesService(_Backend())
+
+    result = await service.set_package_enabled_state("emulator-5554", "com.example.app", "default")
+
+    assert calls == ["pm default-state com.example.app", "pm default com.example.app"]
+    assert result.new_state == "default"
+
+
+@pytest.mark.asyncio
+async def test_set_package_enabled_state__empty_package_rejected_before_backend() -> None:
+    backend = _ShellRecordingBackend()
+    service = PackagesService(backend)
+
+    with pytest.raises(InvalidArgumentError):
+        await service.set_package_enabled_state("emulator-5554", "  ", "enabled")
+
+    assert backend.last_shell_command is None
+
+
+@pytest.mark.asyncio
+async def test_set_package_enabled_state__negative_user_id_rejected_before_backend() -> None:
+    backend = _ShellRecordingBackend()
+    service = PackagesService(backend)
+
+    with pytest.raises(InvalidArgumentError):
+        await service.set_package_enabled_state(
+            "emulator-5554", "com.example.app", "enabled", user_id=-1
+        )
+
+    assert backend.last_shell_command is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_component", ["with space", "a/b", ""])
+async def test_set_package_enabled_state__malformed_component_rejected_before_backend(
+    bad_component: str,
+) -> None:
+    backend = _ShellRecordingBackend()
+    service = PackagesService(backend)
+
+    with pytest.raises(InvalidArgumentError):
+        await service.set_package_enabled_state(
+            "emulator-5554", "com.example.app", "enabled", component=bad_component
+        )
+
+    assert backend.last_shell_command is None
+
+
+@pytest.mark.asyncio
+async def test_set_package_enabled_state__unknown_package_raises_package_not_found() -> None:
+    backend = FakeBackend(
+        pm_set_enabled_result=CommandResult(
+            stdout=(
+                "\nException occurred while executing 'disable-user':\n"
+                "java.lang.IllegalArgumentException: Unknown package: com.zzz.nope\n"
+                "\tat com.android.server.pm.PackageManagerService.setEnabledSettings(PMS.java:4192)\n"
+            ),
+            stderr="",
+            exit_code=255,
+            duration_ms=8.0,
+        )
+    )
+    service = PackagesService(backend)
+
+    with pytest.raises(PackageNotFoundError):
+        await service.set_package_enabled_state("emulator-5554", "com.zzz.nope", "disabled_user")
+
+
+@pytest.mark.asyncio
+async def test_set_package_enabled_state__security_exception_raises_permission_denied() -> None:
+    backend = FakeBackend(
+        pm_set_enabled_result=CommandResult(
+            stdout=(
+                "\nException occurred while executing 'disable-user':\n"
+                "java.lang.SecurityException: Shell cannot change component state for "
+                "ComponentInfo{com.android.car.mapsplaceholder/...NoSuchThing} to 3\n"
+                "\tat com.android.server.pm.PackageManagerService.setEnabledSettings(PMS.java:4219)\n"
+            ),
+            stderr="",
+            exit_code=255,
+            duration_ms=8.0,
+        )
+    )
+    service = PackagesService(backend)
+
+    with pytest.raises(PermissionDeniedError):
+        await service.set_package_enabled_state(
+            "emulator-5554", "com.android.car.mapsplaceholder", "disabled_user", component=".NoSuchThing"
+        )
+
+
+@pytest.mark.asyncio
+async def test_set_package_enabled_state__unknown_serial_raises_device_not_found() -> None:
+    backend = FakeBackend(
+        pm_set_enabled_result=CommandResult(
+            stdout="", stderr="adb: device 'bogus' not found\n", exit_code=1, duration_ms=8.0
+        )
+    )
+    service = PackagesService(backend)
+
+    with pytest.raises(DeviceNotFoundError):
+        await service.set_package_enabled_state("bogus", "com.example.app", "enabled")
+
+
+@pytest.mark.asyncio
+async def test_set_package_enabled_state__zero_exit_no_confirmation_line_is_not_a_crash() -> None:
+    backend = FakeBackend(
+        pm_set_enabled_result=CommandResult(stdout="", stderr="", exit_code=0, duration_ms=8.0)
+    )
+    service = PackagesService(backend)
+
+    result = await service.set_package_enabled_state("emulator-5554", "com.example.app", "enabled")
+
+    assert result.success is True
+    assert result.new_state is None
+
+
+@pytest.mark.asyncio
+async def test_set_package_enabled_state__adb_unavailable_propagates() -> None:
+    service = PackagesService(FakeBackend(unavailable=True))
+
+    with pytest.raises(AdbUnavailableError):
+        await service.set_package_enabled_state("emulator-5554", "com.example.app", "enabled")
+
+
+def test_package_enabled_state_result_summary() -> None:
+    s = PackageEnabledStateResult(
+        serial="emulator-5554",
+        package_name="com.x",
+        component=None,
+        target="com.x",
+        user_id=10,
+        requested_state="disabled_user",
+        new_state="disabled_user",
+        success=True,
+    ).summary()
+    assert "com.x on emulator-5554 for user 10 is now 'disabled_user'." == s

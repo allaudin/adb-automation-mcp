@@ -130,6 +130,7 @@ class FakeBackend:
         uiautomator_dump_result: CommandResult | None = None,
         ui_hierarchy_cat_result: CommandResult | None = None,
         grant_permission_result: CommandResult | None = None,
+        revoke_permission_result: CommandResult | None = None,
         get_setting_result: CommandResult | None = None,
         dumpsys_power_result: CommandResult | None = None,
         ip_addr_show_result: CommandResult | None = None,
@@ -657,6 +658,14 @@ class FakeBackend:
         self._grant_permission_result = grant_permission_result or CommandResult(
             stdout="", stderr="", exit_code=0, duration_ms=60.0
         )
+        # `pm revoke [--user N] PACKAGE PERMISSION` — verified live on a car AVD:
+        # silent, exit 0 on success, and idempotent (revoking an already-revoked
+        # or not-requested runtime permission is also silent + exit 0). Failure
+        # modes surface as a Java stack trace / "Failure [reason]" line on a
+        # non-zero exit — see PermissionsService._raise_for_grant_failure.
+        self._revoke_permission_result = revoke_permission_result or CommandResult(
+            stdout="", stderr="", exit_code=0, duration_ms=60.0
+        )
         # `settings get NAMESPACE KEY` — a typical set value. Not captured
         # from a live device in this environment (none was available); same
         # caveat as grant_permission_result above.
@@ -871,6 +880,8 @@ class FakeBackend:
             return self._ui_hierarchy_cat_result
         if command.startswith("pm grant "):
             return self._grant_permission_result
+        if command.startswith("pm revoke "):
+            return self._revoke_permission_result
         if command.startswith("settings ") and " get " in command:
             return self._get_setting_result
         if command == "dumpsys power":

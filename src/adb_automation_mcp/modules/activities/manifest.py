@@ -6,12 +6,12 @@ registers at server startup.
 from __future__ import annotations
 
 from adb_automation_mcp.modules.activities.service import ActivitiesService
-from adb_automation_mcp.modules.activities.tools import start_activity
+from adb_automation_mcp.modules.activities.tools import resolve_activity, start_activity
 from adb_automation_mcp.registry import ModuleManifest
 
 MODULE = ModuleManifest(
     name="activities",
     service_factory=ActivitiesService,
-    tools=[start_activity],
+    tools=[start_activity, resolve_activity],
     resources=[],
 )

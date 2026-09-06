@@ -1,5 +1,6 @@
 """Domain logic for the activities module: launching Android activities
-(`adb shell am start`) on a connected device.
+(`adb shell am start`) and resolving which Activity would handle an Intent
+without launching it (`adb shell cmd package resolve-activity`).
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from adb_automation_mcp.errors import (
     BackendError,
     ComponentNotFoundError,
     DeviceNotFoundError,
+    InvalidArgumentError,
     PermissionDeniedError,
 )
 
@@ -63,11 +65,83 @@ class StartActivityResult(BaseModel):
         return f"Failed to launch {self.component} on {self.serial}: {self.error_message}"
 
 
+class ResolvedActivity(BaseModel):
+    """Which Activity Android would pick for an Intent, from
+    `cmd package resolve-activity --brief`. Nothing is launched.
+
+    resolved is False for the "No activity found" outcome (a valid answer, not
+    an error) — component and the parsed fields are then null. When resolved is
+    True, component is "<package>/<class>" and is_default says whether the
+    winner is a default handler (as opposed to the system resolver/chooser
+    being what actually matched).
+    """
+
+    serial: str
+    resolved: bool
+    component: str | None
+    package_name: str | None
+    activity_class: str | None
+    is_default: bool | None
+    match: str | None
+    priority: int | None
+
+    def summary(self) -> str:
+        if not self.resolved:
+            return f"No activity resolves that intent on {self.serial}."
+        default = "" if self.is_default is None else (" (default)" if self.is_default else " (via resolver)")
+        return f"{self.component} resolves that intent on {self.serial}{default}."
+
+
 class ActivitiesService:
-    """Launches Android activities on a connected device."""
+    """Launches Android activities on a connected device, and resolves intents
+    to activities without launching.
+    """
 
     def __init__(self, backend: AdbBackend) -> None:
         self._backend = backend
+
+    async def resolve_activity(
+        self,
+        serial: str,
+        action: str | None = None,
+        data_uri: str | None = None,
+        mime_type: str | None = None,
+        categories: list[str] | None = None,
+        component: str | None = None,
+        package_name: str | None = None,
+        user_id: int | None = None,
+    ) -> ResolvedActivity:
+        categories = categories or []
+        if not any([action, data_uri, mime_type, component, package_name]) and not categories:
+            raise InvalidArgumentError(
+                "Specify at least one of: action, data_uri, mime_type, categories, "
+                "component, package_name.",
+                details={"serial": serial},
+            )
+        if user_id is not None and user_id < 0:
+            raise InvalidArgumentError(
+                "user_id must be a non-negative integer.",
+                details={"serial": serial, "user_id": user_id},
+            )
+
+        parts = ["cmd", "package", "resolve-activity", "--brief"]
+        if user_id is not None:
+            parts.extend(["--user", str(user_id)])
+        if action is not None:
+            parts.extend(["-a", shlex.quote(action)])
+        if data_uri is not None:
+            parts.extend(["-d", shlex.quote(data_uri)])
+        if mime_type is not None:
+            parts.extend(["-t", shlex.quote(mime_type)])
+        for category in categories:
+            parts.extend(["-c", shlex.quote(category)])
+        if component is not None:
+            parts.extend(["-n", shlex.quote(component)])
+        if package_name is not None:
+            parts.extend(["-p", shlex.quote(package_name)])
+
+        result = await self._backend.shell(serial, " ".join(parts))
+        return _parse_resolve_activity(serial, result)
 
     async def start_activity(
         self,
@@ -166,6 +240,81 @@ def _parse_start_activity_result(
         error_message=None,
         output=result.stdout,
     )
+
+
+_RESOLVE_COMPONENT_RE = re.compile(r"^\s*(?P<pkg>[\w.]+)/(?P<cls>[\w.$]+)\s*$", re.MULTILINE)
+_RESOLVE_META_RE = re.compile(r"(\w+)=(\S+)")
+
+
+def _parse_resolve_activity(serial: str, result: CommandResult) -> ResolvedActivity:
+    combined = f"{result.stdout}\n{result.stderr}"
+    message = (result.stderr or result.stdout).strip()
+
+    # `cmd` exits 0 for everything; failures are text-only.
+    if result.exit_code != 0 and message.startswith("adb:") and "not found" in message:
+        raise DeviceNotFoundError(message, details={"serial": serial})
+    if "Bad component name" in combined:
+        # cmd's own Intent parser rejected a malformed -n before resolving.
+        raise InvalidArgumentError(
+            _first_exception_line(combined), details={"serial": serial}
+        )
+    if "Unknown option" in combined:
+        raise BackendError(
+            f"this device's `cmd package resolve-activity` rejected an option: "
+            f"{_first_exception_line(combined)}",
+            details={"serial": serial},
+        )
+
+    if "No activity found" in combined:
+        return ResolvedActivity(
+            serial=serial,
+            resolved=False,
+            component=None,
+            package_name=None,
+            activity_class=None,
+            is_default=None,
+            match=None,
+            priority=None,
+        )
+
+    comp_match = _RESOLVE_COMPONENT_RE.search(result.stdout)
+    if comp_match is None:
+        raise BackendError(
+            "cmd package resolve-activity returned unrecognized output.",
+            details={"serial": serial, "stdout": result.stdout.strip()[:200]},
+        )
+
+    meta: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        if "priority=" in line and "match=" in line:
+            meta = dict(_RESOLVE_META_RE.findall(line))
+            break
+
+    pkg, cls = comp_match.group("pkg"), comp_match.group("cls")
+    is_default_raw = meta.get("isDefault")
+    priority_raw = meta.get("priority")
+    return ResolvedActivity(
+        serial=serial,
+        resolved=True,
+        component=f"{pkg}/{cls}",
+        package_name=pkg,
+        activity_class=cls,
+        is_default=None if is_default_raw is None else is_default_raw == "true",
+        match=meta.get("match"),
+        priority=int(priority_raw) if priority_raw is not None and priority_raw.isdigit() else None,
+    )
+
+
+def _first_exception_line(text: str) -> str:
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("java.") and ":" in line:
+            return line
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line and not line.startswith("at ") and "Exception occurred" not in line:
+            return line
+    return text.strip().splitlines()[0] if text.strip() else "no detail"
 
 
 _ERROR_TYPE_RE = re.compile(r"^Error type (?P<type>\d+)\s*$", re.MULTILINE)

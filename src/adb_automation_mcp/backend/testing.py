@@ -115,6 +115,7 @@ class FakeBackend:
         pm_install_existing_result: CommandResult | None = None,
         send_broadcast_result: CommandResult | None = None,
         start_activity_result: CommandResult | None = None,
+        resolve_activity_result: CommandResult | None = None,
         start_service_result: CommandResult | None = None,
         force_stop_result: CommandResult | None = None,
         pull_result: CommandResult | None = None,
@@ -530,6 +531,21 @@ class FakeBackend:
             exit_code=0,
             duration_ms=200.0,
         )
+        # `adb shell cmd package resolve-activity --brief ...` — captured live
+        # from a car AVD: a "priority=... match=0x... isDefault=..." metadata
+        # line, then the resolved "<package>/<class>" on its own line. `cmd`
+        # always exits 0; "No activity found" is how a non-match is reported,
+        # and a malformed -n component yields a "Bad component name" stack trace
+        # (also exit 0) — see ActivitiesService.resolve_activity.
+        self._resolve_activity_result = resolve_activity_result or CommandResult(
+            stdout=(
+                "priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=true\n"
+                "com.android.car.carlauncher/.CarLauncher\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=90.0,
+        )
         # `adb shell am start-service` — the well-documented, long-stable
         # AOSP `Am.java`/`runStartService` output shape for a normal start:
         # just the "Starting service: Intent { ... }" line. Not captured
@@ -868,6 +884,8 @@ class FakeBackend:
             return self._send_broadcast_result
         if command.startswith("am start-service "):
             return self._start_service_result
+        if command.startswith("cmd package resolve-activity"):
+            return self._resolve_activity_result
         if command.startswith("am start "):
             return self._start_activity_result
         if command.startswith("am force-stop "):

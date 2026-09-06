@@ -11,7 +11,7 @@ from __future__ import annotations
 import base64
 
 from adb_automation_mcp.backend.protocol import CommandResult, DeviceInfo, ExecOutResult
-from adb_automation_mcp.errors import AdbUnavailableError
+from adb_automation_mcp.errors import AdbTimeoutError, AdbUnavailableError
 
 # A real, minimal 2x2 RGBA PNG (77 bytes) — the deterministic stand-in for
 # `adb exec-out screencap -p` output. Generated once with Python's zlib/struct
@@ -31,11 +31,15 @@ class FakeBackend:
         self,
         devices: list[DeviceInfo] | None = None,
         unavailable: bool = False,
+        version_result: CommandResult | None = None,
+        wait_for_device_result: CommandResult | None = None,
+        wait_for_device_timeout: bool = False,
         kill_server_result: CommandResult | None = None,
         start_server_result: CommandResult | None = None,
         connect_result: CommandResult | None = None,
         disconnect_result: CommandResult | None = None,
         root_result: CommandResult | None = None,
+        unroot_result: CommandResult | None = None,
         shell_result: CommandResult | None = None,
         dumpsys_user_result: CommandResult | None = None,
         user_info_result: CommandResult | None = None,
@@ -69,6 +73,7 @@ class FakeBackend:
         start_service_result: CommandResult | None = None,
         force_stop_result: CommandResult | None = None,
         pull_result: CommandResult | None = None,
+        forward_result: CommandResult | None = None,
         clear_app_data_result: CommandResult | None = None,
         exec_out_result: ExecOutResult | None = None,
         input_tap_result: CommandResult | None = None,
@@ -83,6 +88,30 @@ class FakeBackend:
     ) -> None:
         self._devices = devices or []
         self._unavailable = unavailable
+        # Real `adb version` output, captured from an actual run. Modern adb
+        # (platform-tools) prints four lines: the bridge protocol version, the
+        # platform-tools "Version" line, "Installed as <path>", and (added
+        # ~2023) "Running on <os>".
+        self._version_result = version_result or CommandResult(
+            stdout=(
+                "Android Debug Bridge version 1.0.41\n"
+                "Version 37.0.0-eng.allaud\n"
+                "Installed as /media/allaudin/extusb/out/host/linux-x86/bin/adb\n"
+                "Running on Linux 6.8.0-138-generic (x86_64)\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=10.0,
+        )
+        # `adb -s <serial> wait-for-<transport>-<state>` on success: empty
+        # stdout, exit 0, returns as soon as the state is reached (verified live
+        # against a running car AVD). wait_for_device_timeout=True simulates the
+        # block-until-timeout case (unknown serial, or a state the device never
+        # reaches) that the real backend surfaces as AdbTimeoutError.
+        self._wait_for_device_result = wait_for_device_result or CommandResult(
+            stdout="", stderr="", exit_code=0, duration_ms=12.0
+        )
+        self._wait_for_device_timeout = wait_for_device_timeout
         self._kill_server_result = kill_server_result or CommandResult(
             stdout="", stderr="", exit_code=0, duration_ms=5.0
         )
@@ -106,6 +135,14 @@ class FakeBackend:
         # restart_adbd_as_root's docstring for the same caveat.
         self._root_result = root_result or CommandResult(
             stdout="restarting adbd as root\n", stderr="", exit_code=0, duration_ms=800.0
+        )
+        # `adb -s <serial> unroot` output for the common case: adbd currently
+        # running as root, being dropped back to shell. Captured from a live
+        # rootable emulator (car AVD): "restarting adbd as non root", exit 0.
+        # The idempotent "already shell" case prints "adbd not running as root"
+        # (also exit 0) — override this fixture to simulate that.
+        self._unroot_result = unroot_result or CommandResult(
+            stdout="restarting adbd as non root\n", stderr="", exit_code=0, duration_ms=600.0
         )
         # Real `adb shell am get-current-user` output for the common case (a
         # single-user device, primary/owner user), captured from an actual run.
@@ -384,6 +421,13 @@ class FakeBackend:
         # whatever remote_path is actually pulled" — see pull() below, same
         # convention as connect_result. Real, long-stable `adb pull` wording.
         self._pull_result = pull_result
+        # None (the default) means "echo back the resolved local port on stdout
+        # for whatever local endpoint forward() is called with" — see forward()
+        # below. `adb forward` was verified live (car AVD) to print the local
+        # port number even for an explicit `tcp:<n>` local, and the
+        # adb-allocated port for `tcp:0`. A fixed override simulates a failure
+        # ("cannot rebind existing socket", "bad port number", etc.).
+        self._forward_result = forward_result
         # `adb shell pm clear` — PackageManagerShellCommand's documented,
         # long-stable success text: a bare "Success". Not captured from a
         # live device in this environment (none was available); same caveat
@@ -531,6 +575,22 @@ class FakeBackend:
         self._raise_if_unavailable()
         return list(self._devices)
 
+    async def version(self) -> CommandResult:
+        self._raise_if_unavailable()
+        return self._version_result
+
+    async def wait_for_device(
+        self, serial: str, wait_token: str, timeout_s: float
+    ) -> CommandResult:
+        self._raise_if_unavailable()
+        if self._wait_for_device_timeout:
+            raise AdbTimeoutError(
+                f"adb command timed out after {timeout_s * 1000:.0f}ms.",
+                details={"timeout_ms": timeout_s * 1000, "command": f"-s {serial} {wait_token}"},
+                remediation="The device or adb server may be busy or unresponsive. Retrying is reasonable.",
+            )
+        return self._wait_for_device_result
+
     async def exec_out(self, serial: str, command: str) -> ExecOutResult:
         self._raise_if_unavailable()
         return self._exec_out_result
@@ -652,6 +712,24 @@ class FakeBackend:
     async def push(self, serial: str, local_path: str, remote_path: str) -> CommandResult:
         raise NotImplementedError("FakeBackend.push: no module needs this yet")
 
+    async def forward(
+        self, serial: str, local: str, remote: str, no_rebind: bool
+    ) -> CommandResult:
+        self._raise_if_unavailable()
+        if self._forward_result is not None:
+            return self._forward_result
+        # Mirror live `adb forward`: echo the resolved local port on stdout.
+        # `tcp:0` → a deterministic stand-in for an adb-allocated ephemeral port.
+        if local == "tcp:0":
+            resolved = "41000"
+        elif local.startswith("tcp:"):
+            resolved = local.split(":", 1)[1]
+        else:
+            resolved = ""
+        return CommandResult(
+            stdout=f"{resolved}\n" if resolved else "", stderr="", exit_code=0, duration_ms=30.0
+        )
+
     async def pull(self, serial: str, remote_path: str, local_path: str) -> CommandResult:
         self._raise_if_unavailable()
         if self._pull_result is not None:
@@ -691,3 +769,7 @@ class FakeBackend:
     async def root(self, serial: str) -> CommandResult:
         self._raise_if_unavailable()
         return self._root_result
+
+    async def unroot(self, serial: str) -> CommandResult:
+        self._raise_if_unavailable()
+        return self._unroot_result

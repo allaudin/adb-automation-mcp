@@ -31,6 +31,7 @@ nav:
       - diagnostics: reference/diagnostics.md
       - device_info: reference/device_info.md
       - connection: reference/connection.md
+      - port_forwarding: reference/port_forwarding.md
       - user: reference/user.md
       - logger: reference/logger.md
       - system_properties: reference/system_properties.md

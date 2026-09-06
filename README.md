@@ -84,7 +84,7 @@ uv run mkdocs build --strict   # docs site
 
 ## Tools
 
-**42 tools.** Full signatures, docstrings, and worked examples are in the
+**46 tools.** Full signatures, docstrings, and worked examples are in the
 [tool reference](https://allaudin.github.io/adb-automation-mcp/reference/diagnostics/).
 Tools marked † are `destructive` — not registered unless
 `ADB_AUTOMATION_ALLOW_DESTRUCTIVE=1`.
@@ -96,16 +96,17 @@ Tools marked † are `destructive` — not registered unless
 | `android_services` (1) | `start_service` |
 | `app_data` (1) | `clear_app_data`† |
 | `broadcasts` (1) | `send_broadcast` |
-| `connection` (4) | `restart_adb_server`, `connect_device`, `disconnect_device`, `restart_adbd_as_root`† |
+| `connection` (6) | `restart_adb_server`, `connect_device`, `disconnect_device`, `restart_adbd_as_root`†, `restart_adbd_as_shell`, `wait_for_device_state` |
 | `date_time` (1) | `get_date_time` |
 | `device_info` (1) | `list_connected_devices` |
-| `diagnostics` (1) | `check_adb_available` |
+| `diagnostics` (2) | `check_adb_available`, `get_adb_version` |
 | `files` (1) | `pull_file` |
 | `input` (1) | `tap` |
 | `logger` (6) | `read_logs`, `clear_logs`, `get_log_buffer_size`, `read_package_logs`, `start_log_session`, `stop_log_session` |
 | `network` (1) | `list_network_interfaces` |
 | `packages` (4) | `list_packages`, `install_apk`, `uninstall_package`†, `install_existing_for_user` |
 | `permissions` (1) | `grant_permission` |
+| `port_forwarding` (1) | `create_forward` |
 | `power` (1) | `get_power_state` |
 | `processes` (1) | `force_stop_app` |
 | `screen` (1) | `take_screenshot` |

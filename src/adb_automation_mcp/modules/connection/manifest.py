@@ -11,12 +11,21 @@ from adb_automation_mcp.modules.connection.tools import (
     disconnect_device,
     restart_adb_server,
     restart_adbd_as_root,
+    restart_adbd_as_shell,
+    wait_for_device_state,
 )
 from adb_automation_mcp.registry import ModuleManifest
 
 MODULE = ModuleManifest(
     name="connection",
     service_factory=ConnectionService,
-    tools=[restart_adb_server, connect_device, disconnect_device, restart_adbd_as_root],
+    tools=[
+        restart_adb_server,
+        connect_device,
+        disconnect_device,
+        restart_adbd_as_root,
+        restart_adbd_as_shell,
+        wait_for_device_state,
+    ],
     resources=[],
 )

@@ -13,6 +13,7 @@ from fastmcp import Context
 
 from adb_automation_mcp.modules.permissions.service import (
     GrantPermissionResult,
+    PackagePermissions,
     PermissionsService,
     RevokePermissionResult,
 )
@@ -144,3 +145,72 @@ async def revoke_permission(
     services = cast("dict[str, object]", ctx.lifespan_context["services"])
     permissions = cast(PermissionsService, services["permissions"])
     return await permissions.revoke_permission(serial, package_name, permission, user_id=user_id)
+
+
+@category("read")
+async def get_package_permissions(
+    ctx: Context, serial: str, package_name: str
+) -> PackagePermissions:
+    """A package's full permission picture: `adb shell dumpsys package <pkg>`.
+
+    Read this before calling grant_permission / revoke_permission blindly — it
+    shows what the package requests, what its manifest defines, and what's
+    actually granted (install-time, and runtime per Android user with flags).
+    Parses the stable permission sub-blocks out of dumpsys, not the whole dump.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+        package_name: The package to inspect, e.g. "com.example.app".
+
+    Returns:
+        A PackagePermissions: requested_permissions (names the manifest uses),
+        declared_permissions (name + protection level the manifest defines),
+        install_permissions (name + granted, package-wide), and
+        runtime_permissions — one entry per Android user, each listing name +
+        granted + flags (USER_SET, SYSTEM_FIXED, POLICY_FIXED,
+        GRANTED_BY_DEFAULT, RESTRICTION_UPGRADE_EXEMPT, …). Any section this
+        Android version's dumpsys omits comes back as an empty list.
+
+    Error handling:
+        An empty package_name raises INVALID_ARGUMENT before any adb call. An
+        unknown serial raises DEVICE_NOT_FOUND; an unreachable adb binary raises
+        ADB_UNAVAILABLE. A package dumpsys has no record of raises
+        PACKAGE_NOT_FOUND (dumpsys says "Unable to find package" and still exits
+        0 — this tool turns that into the error).
+
+    Example:
+        Called with serial="emulator-5554", package_name="com.example.app". A
+        typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "com.example.app on emulator-5554: 4 requested, 2 install-time granted, 1 runtime granted across 1 user(s).",
+          "data": {
+            "serial": "emulator-5554",
+            "package_name": "com.example.app",
+            "requested_permissions": [
+              "android.permission.INTERNET", "android.permission.CAMERA"
+            ],
+            "declared_permissions": [
+              {"name": "com.example.app.CUSTOM", "protection": "signature"}
+            ],
+            "install_permissions": [
+              {"name": "android.permission.INTERNET", "granted": true, "flags": []}
+            ],
+            "runtime_permissions": [
+              {
+                "user_id": 0,
+                "permissions": [
+                  {"name": "android.permission.CAMERA", "granted": true, "flags": ["USER_SET"]}
+                ]
+              }
+            ]
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    permissions = cast(PermissionsService, services["permissions"])
+    return await permissions.get_package_permissions(serial, package_name)

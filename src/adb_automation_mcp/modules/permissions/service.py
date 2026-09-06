@@ -1,6 +1,7 @@
 """Domain logic for the permissions module: granting (`adb shell pm grant`) and
 revoking (`adb shell pm revoke`) an Android runtime permission for an installed
-package. Checking and listing permissions aren't implemented yet.
+package, and reading a package's full permission picture from
+`adb shell dumpsys package` (get_package_permissions).
 """
 
 from __future__ import annotations
@@ -10,6 +11,14 @@ import shlex
 from pydantic import BaseModel
 
 from adb_automation_mcp.backend.protocol import AdbBackend, CommandResult
+from adb_automation_mcp.dumpsys_package import (
+    find_package_block,
+    package_present,
+    parse_declared_permissions,
+    parse_install_permissions,
+    parse_requested_permissions,
+    parse_runtime_permissions_by_user,
+)
 from adb_automation_mcp.errors import (
     BackendError,
     DeviceNotFoundError,
@@ -73,11 +82,110 @@ class RevokePermissionResult(BaseModel):
         return f"Revoked {self.permission} from {self.package_name} on {self.serial}."
 
 
+class PermissionGrant(BaseModel):
+    """One permission and whether it's currently granted, plus any per-grant
+    flags dumpsys reports (USER_SET, SYSTEM_FIXED, POLICY_FIXED,
+    GRANTED_BY_DEFAULT, RESTRICTION_UPGRADE_EXEMPT, …). flags is empty for
+    install-time permissions, which dumpsys prints without one.
+    """
+
+    name: str
+    granted: bool
+    flags: list[str] = []
+
+
+class DeclaredPermission(BaseModel):
+    """A permission the package's own manifest defines (not one it uses)."""
+
+    name: str
+    protection: str | None
+
+
+class PackageUserPermissions(BaseModel):
+    """Runtime permission grant state for one Android user."""
+
+    user_id: int
+    permissions: list[PermissionGrant]
+
+
+class PackagePermissions(BaseModel):
+    """A package-focused permission snapshot parsed from `dumpsys package`.
+
+    Read-only companion to grant_permission / revoke_permission: what a package
+    asks for, what it defines, and what's actually granted — install-time
+    (package-wide) and runtime (per Android user, with flags). Every list is
+    best-effort and may be empty on a build whose dumpsys omits that section.
+    """
+
+    serial: str
+    package_name: str
+    requested_permissions: list[str]
+    declared_permissions: list[DeclaredPermission]
+    install_permissions: list[PermissionGrant]
+    runtime_permissions: list[PackageUserPermissions]
+
+    def summary(self) -> str:
+        runtime_granted = sum(
+            1 for u in self.runtime_permissions for p in u.permissions if p.granted
+        )
+        install_granted = sum(1 for p in self.install_permissions if p.granted)
+        return (
+            f"{self.package_name} on {self.serial}: {len(self.requested_permissions)} requested, "
+            f"{install_granted} install-time granted, {runtime_granted} runtime granted "
+            f"across {len(self.runtime_permissions)} user(s)."
+        )
+
+
 class PermissionsService:
-    """Grants and revokes Android runtime permissions for an installed package."""
+    """Grants and revokes Android runtime permissions for an installed package,
+    and reports a package's full permission picture.
+    """
 
     def __init__(self, backend: AdbBackend) -> None:
         self._backend = backend
+
+    async def get_package_permissions(
+        self, serial: str, package_name: str
+    ) -> PackagePermissions:
+        if not package_name.strip():
+            raise InvalidArgumentError(
+                "package_name must not be empty.", details={"serial": serial}
+            )
+
+        result = await self._backend.shell(serial, f"dumpsys package {shlex.quote(package_name)}")
+        _raise_for_shell_failure(serial, result)
+
+        text = result.stdout
+        if not package_present(text, package_name):
+            raise PackageNotFoundError(
+                f"dumpsys package has no record of {package_name} on {serial}.",
+                details={"serial": serial, "package_name": package_name},
+            )
+
+        block = find_package_block(text, package_name) or []
+        runtime_by_user = parse_runtime_permissions_by_user(text)
+        return PackagePermissions(
+            serial=serial,
+            package_name=package_name,
+            requested_permissions=parse_requested_permissions(block),
+            declared_permissions=[
+                DeclaredPermission(name=n, protection=p)
+                for n, p in parse_declared_permissions(block)
+            ],
+            install_permissions=[
+                PermissionGrant(name=n, granted=g) for n, g in parse_install_permissions(block)
+            ],
+            runtime_permissions=[
+                PackageUserPermissions(
+                    user_id=uid,
+                    permissions=[
+                        PermissionGrant(name=n, granted=g, flags=f)
+                        for n, g, f in runtime_by_user[uid]
+                    ],
+                )
+                for uid in sorted(runtime_by_user)
+            ],
+        )
 
     async def grant_permission(
         self, serial: str, package_name: str, permission: str, user_id: int | None = None
@@ -131,6 +239,19 @@ class PermissionsService:
         result = await self._backend.shell(serial, " ".join(parts))
         _raise_for_grant_failure(serial, package_name, permission, result)
         return result
+
+
+def _raise_for_shell_failure(serial: str, result: CommandResult) -> None:
+    """Transport-level classification for a plain `adb shell` command (used by
+    get_package_permissions, whose `dumpsys package` failures aren't the
+    grant/revoke Failure-line shape).
+    """
+    if result.exit_code == 0:
+        return
+    message = (result.stderr or result.stdout).strip() or "adb shell command exited non-zero."
+    if message.startswith("adb:") and "not found" in message:
+        raise DeviceNotFoundError(message, details={"serial": serial})
+    raise BackendError(message, details={"serial": serial, "exit_code": result.exit_code})
 
 
 def _raise_for_grant_failure(

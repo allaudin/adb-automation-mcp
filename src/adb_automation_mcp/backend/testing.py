@@ -118,6 +118,7 @@ class FakeBackend:
         resolve_activity_result: CommandResult | None = None,
         dumpsys_activity_activities_result: CommandResult | None = None,
         start_service_result: CommandResult | None = None,
+        start_foreground_service_result: CommandResult | None = None,
         force_stop_result: CommandResult | None = None,
         pull_result: CommandResult | None = None,
         forward_result: CommandResult | None = None,
@@ -591,6 +592,18 @@ class FakeBackend:
             exit_code=0,
             duration_ms=140.0,
         )
+        # `adb shell am start-foreground-service` — same "Starting service:
+        # Intent { ... }" line, no "Error:" line, exit 0 on success (verified
+        # live on a car AVD against com.android.systemui/.SystemUIService). A
+        # well-formed component with no matching service still exits 0 with an
+        # "Error: Not found; no service started." line; a malformed -n yields a
+        # "Bad component name" stack trace (also exit 0).
+        self._start_foreground_service_result = start_foreground_service_result or CommandResult(
+            stdout="Starting service: Intent { cmp=com.example.app/.MyFgService }\n",
+            stderr="",
+            exit_code=0,
+            duration_ms=150.0,
+        )
         # `adb shell am force-stop` — the well-documented, long-stable AOSP
         # behavior: no stdout at all on success. Not captured from a live
         # device in this environment (none was available); same caveat as
@@ -918,6 +931,8 @@ class FakeBackend:
             return self._send_broadcast_result
         if command.startswith("am start-service "):
             return self._start_service_result
+        if command.startswith("am start-foreground-service "):
+            return self._start_foreground_service_result
         if command.startswith("cmd package resolve-activity"):
             return self._resolve_activity_result
         if command == "dumpsys activity activities":

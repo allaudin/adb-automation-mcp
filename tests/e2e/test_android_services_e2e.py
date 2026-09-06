@@ -141,3 +141,85 @@ async def test_start_service_tool_adb_failure_returns_device_not_found_error() -
     assert result.data.status == "error"
     assert result.data.error is not None
     assert result.data.error.code == "DEVICE_NOT_FOUND"
+
+
+# --- start_foreground_service ------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_start_foreground_service_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "start_foreground_service",
+            {"serial": "emulator-5554", "component": "com.example.app/.MyFgService"},
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.component == "com.example.app/.MyFgService"
+    assert "Starting service:" in result.data.data.output
+
+
+@pytest.mark.asyncio
+async def test_start_foreground_service_tool_accepts_user_id() -> None:
+    captured: dict[str, str] = {}
+
+    class RecordingBackend(FakeBackend):
+        async def shell(self, serial: str, command: str) -> CommandResult:
+            captured["command"] = command
+            return await super().shell(serial, command)
+
+    mcp = _build_test_server(RecordingBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "start_foreground_service",
+            {
+                "serial": "emulator-5554",
+                "component": "com.example.app/.MyFgService",
+                "user_id": 10,
+            },
+        )
+
+    assert result.data.status == "success"
+    assert captured["command"] == (
+        "am start-foreground-service -n com.example.app/.MyFgService --user 10"
+    )
+
+
+@pytest.mark.asyncio
+async def test_start_foreground_service_tool_missing_service_returns_component_not_found() -> None:
+    mcp = _build_test_server(
+        FakeBackend(
+            start_foreground_service_result=CommandResult(
+                stdout=(
+                    "Starting service: Intent { cmp=com.example.nope/.NoService }\n"
+                    "Error: Not found; no service started.\n"
+                ),
+                stderr="",
+                exit_code=0,
+                duration_ms=5.0,
+            )
+        )
+    )
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "start_foreground_service",
+            {"serial": "emulator-5554", "component": "com.example.nope/.NoService"},
+        )
+
+    assert result.data.status == "error"
+    assert result.data.error is not None
+    assert result.data.error.code == "COMPONENT_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_start_foreground_service_tool_is_registered() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        names = {tool.name for tool in await client.list_tools()}
+
+    assert "start_foreground_service" in names

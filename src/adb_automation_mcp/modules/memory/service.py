@@ -247,6 +247,89 @@ class HeapDumpResult(BaseModel):
         return f"Captured {kind} heap dump of {self.package} from {self.serial} to {self.local_path}."
 
 
+class HeapWatchResult(BaseModel):
+    """Outcome of `adb shell am set-watch-heap <package> <bytes>`.
+
+    Configures ActivityManager to auto-collect a heap dump when the
+    process's PSS reaches threshold_bytes. `am` doesn't validate the
+    package, so an unknown one is not an error.
+    """
+
+    serial: str
+    package: str
+    threshold_bytes: int
+    watching: bool
+
+    def summary(self) -> str:
+        return (
+            f"Watching {self.package} on {self.serial}; a heap dump triggers at "
+            f"{self.threshold_bytes} bytes PSS."
+        )
+
+
+class ClearHeapWatchResult(BaseModel):
+    """Outcome of `adb shell am clear-watch-heap <package>`. Idempotent."""
+
+    serial: str
+    package: str
+    cleared: bool
+
+    def summary(self) -> str:
+        return f"Cleared the heap watch for {self.package} on {self.serial}."
+
+
+class MemoryMaps(BaseModel):
+    """Aggregate memory-map figures for a process, from
+    `/proc/<pid>/smaps_rollup` (all values in kilobytes).
+
+    These are the kernel's own rollup totals — Rss/Pss and the
+    shared/private clean/dirty split, plus swap. Any field the kernel
+    didn't emit is null. This is a fixed, compact model, not a generic
+    /proc reader.
+    """
+
+    serial: str
+    pid: int
+    rss_kb: int | None
+    pss_kb: int | None
+    pss_dirty_kb: int | None
+    pss_anon_kb: int | None
+    pss_file_kb: int | None
+    pss_shmem_kb: int | None
+    shared_clean_kb: int | None
+    shared_dirty_kb: int | None
+    private_clean_kb: int | None
+    private_dirty_kb: int | None
+    referenced_kb: int | None
+    anonymous_kb: int | None
+    swap_kb: int | None
+    swap_pss_kb: int | None
+    locked_kb: int | None
+
+    def summary(self) -> str:
+        pss = f"{self.pss_kb} KB PSS" if self.pss_kb is not None else "PSS unknown"
+        return f"pid {self.pid} on {self.serial}: {pss}."
+
+
+_SMAPS_FIELDS: tuple[tuple[str, str], ...] = (
+    ("Rss", "rss_kb"),
+    ("Pss", "pss_kb"),
+    ("Pss_Dirty", "pss_dirty_kb"),
+    ("Pss_Anon", "pss_anon_kb"),
+    ("Pss_File", "pss_file_kb"),
+    ("Pss_Shmem", "pss_shmem_kb"),
+    ("Shared_Clean", "shared_clean_kb"),
+    ("Shared_Dirty", "shared_dirty_kb"),
+    ("Private_Clean", "private_clean_kb"),
+    ("Private_Dirty", "private_dirty_kb"),
+    ("Referenced", "referenced_kb"),
+    ("Anonymous", "anonymous_kb"),
+    ("Swap", "swap_kb"),
+    ("SwapPss", "swap_pss_kb"),
+    ("Locked", "locked_kb"),
+)
+
+
 class MemoryService:
     """Structured memory diagnostics for a connected device."""
 
@@ -408,6 +491,59 @@ class MemoryService:
             success=True,
         )
 
+    async def set_heap_watch(
+        self, serial: str, package: str, threshold_bytes: int
+    ) -> HeapWatchResult:
+        _require_non_blank("package", package)
+        if threshold_bytes <= 0:
+            raise InvalidArgumentError(
+                "threshold_bytes must be a positive integer.",
+                details={"serial": serial, "threshold_bytes": threshold_bytes},
+            )
+        result = await self._backend.shell(
+            serial, f"am set-watch-heap {shlex.quote(package)} {threshold_bytes}"
+        )
+        _raise_for_am_failure(serial, result, "am set-watch-heap")
+        return HeapWatchResult(
+            serial=serial, package=package, threshold_bytes=threshold_bytes, watching=True
+        )
+
+    async def clear_heap_watch(self, serial: str, package: str) -> ClearHeapWatchResult:
+        _require_non_blank("package", package)
+        result = await self._backend.shell(serial, f"am clear-watch-heap {shlex.quote(package)}")
+        _raise_for_am_failure(serial, result, "am clear-watch-heap")
+        return ClearHeapWatchResult(serial=serial, package=package, cleared=True)
+
+    async def get_memory_maps(self, serial: str, pid: int) -> MemoryMaps:
+        if pid <= 0:
+            raise InvalidArgumentError(
+                "pid must be a positive integer.", details={"serial": serial, "pid": pid}
+            )
+        result = await self._backend.shell(serial, f"cat /proc/{pid}/smaps_rollup")
+        combined = f"{result.stdout}\n{result.stderr}"
+        if "Permission denied" in combined:
+            raise PermissionDeniedError(
+                f"reading /proc/{pid}/smaps_rollup is not permitted (root/SELinux).",
+                details={"serial": serial, "pid": pid},
+            )
+        if "No such file" in combined or "No such process" in combined:
+            raise RemoteFileNotFoundError(
+                f"no /proc/{pid}/smaps_rollup — pid {pid} is not a running process.",
+                details={"serial": serial, "pid": pid},
+            )
+        _raise_for_shell_failure(serial, result)
+
+        values: dict[str, int | None] = {}
+        for label, field in _SMAPS_FIELDS:
+            m = re.search(rf"^{re.escape(label)}:\s*(\d+)\s*kB", result.stdout, re.MULTILINE)
+            values[field] = int(m.group(1)) if m else None
+        if all(v is None for v in values.values()):
+            raise MemoryInfoUnavailableError(
+                f"/proc/{pid}/smaps_rollup produced no recognizable fields.",
+                details={"serial": serial, "pid": pid, "output_head": result.stdout[:200]},
+            )
+        return MemoryMaps(serial=serial, pid=pid, **values)
+
     async def _meminfo(self, serial: str, command: str, target: str) -> str:
         result = await self._backend.shell(serial, command)
         _raise_for_shell_failure(serial, result)
@@ -493,6 +629,18 @@ def _raise_for_shell_failure(serial: str, result: CommandResult) -> None:
         raise DeviceNotFoundError(message, details={"serial": serial})
     if "Permission Denial" in message or "Permission denied" in message:
         raise PermissionDeniedError(message, details={"serial": serial})
+    raise BackendError(message, details={"serial": serial, "exit_code": result.exit_code})
+
+
+def _raise_for_am_failure(serial: str, result: CommandResult, what: str) -> None:
+    combined = f"{result.stdout}\n{result.stderr}"
+    if "Permission Denial" in combined or "Permission denied" in combined:
+        raise PermissionDeniedError(f"{what} was refused.", details={"serial": serial})
+    if result.exit_code == 0 and "Exception occurred" not in combined and "Error:" not in combined:
+        return
+    message = (result.stderr or result.stdout).strip() or f"{what} exited non-zero."
+    if message.startswith("adb:") and "not found" in message:
+        raise DeviceNotFoundError(message, details={"serial": serial})
     raise BackendError(message, details={"serial": serial, "exit_code": result.exit_code})
 
 

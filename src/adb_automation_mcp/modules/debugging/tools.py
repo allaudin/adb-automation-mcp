@@ -14,6 +14,8 @@ from adb_automation_mcp.modules.debugging.service import (
     ClearDebugAppResult,
     DebuggingService,
     JdwpProcessList,
+    NativeBacktrace,
+    NativeTombstone,
     ProcessExitHistory,
     SetDebugAppResult,
 )
@@ -229,3 +231,123 @@ async def list_jdwp_processes(ctx: Context, serial: str) -> JdwpProcessList:
     services = cast("dict[str, object]", ctx.lifespan_context["services"])
     debugging = cast(DebuggingService, services["debugging"])
     return await debugging.list_jdwp_processes(serial)
+
+
+@category("read")
+async def capture_native_backtrace(ctx: Context, serial: str, pid: int) -> NativeBacktrace:
+    """Capture native thread backtraces for a running process: `adb shell
+    debuggerd -b <pid>`.
+
+    Dumps every thread's native call stack without stopping the process.
+    Returns the parsed header (process name, ABI), a per-thread summary
+    (name / tid / frame count), and the full backtrace text (capped). This
+    is a privileged operation on production builds — a device that isn't
+    rooted/userdebug rejects it.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+        pid: The process id to backtrace (a positive integer — see
+            processes.get_process_id / list_processes).
+
+    Returns:
+        The serial and pid; process_name and abi from the dump header;
+        thread_count and threads (name / sys_tid / frame_count per thread);
+        and text (the full dump, truncated if very large).
+
+    Error handling:
+        A non-positive pid raises INVALID_ARGUMENT before anything runs. An
+        unknown serial raises DEVICE_NOT_FOUND. A device that requires root
+        for debuggerd, or otherwise refuses it, raises PERMISSION_DENIED. A
+        dead or invalid pid (debuggerd produced no backtrace) raises
+        BACKEND_ERROR.
+
+    Example:
+        Called with serial="emulator-5554", pid=1224. A typical (trimmed)
+        response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "capture_native_backtrace completed successfully.",
+          "data": {
+            "serial": "emulator-5554",
+            "pid": 1224,
+            "process_name": "com.android.systemui",
+            "abi": "x86_64",
+            "thread_count": 2,
+            "threads": [
+              {"name": "ndroid.systemui", "sys_tid": 1224, "frame_count": 17}
+            ],
+            "text": "----- pid 1224 at ... -----\\nCmd line: com.android.systemui\\n..."
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    debugging = cast(DebuggingService, services["debugging"])
+    return await debugging.capture_native_backtrace(serial, pid)
+
+
+@category("write")
+async def capture_native_tombstone(
+    ctx: Context, serial: str, pid: int, local_path: str
+) -> NativeTombstone:
+    """Request a full native tombstone for a process and save it to the
+    host: `adb shell debuggerd <pid>`.
+
+    Triggers a full crash-style dump (registers, memory map, all thread
+    backtraces) for a running process and writes the human-readable
+    tombstone text into `<ADB_AUTOMATION_LOCAL_ROOT>/tombstones/`.
+    Categorized `write` because it's a high-impact diagnostic that briefly
+    pauses the target's threads, and is privileged on production builds. The
+    tombstone bytes are not embedded in the response — only the saved path
+    and parsed metadata.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+        pid: The process id to dump (a positive integer).
+        local_path: Destination path relative to the server's local_root
+            `tombstones/` directory, e.g. "sysui.txt" or "run1/sysui.txt".
+            Must resolve inside local_root.
+
+    Returns:
+        The serial and pid; process_name / abi / signal from the header;
+        frame_count (the "N total frames" value); device_tombstone_ref (the
+        `tombstone_NN.pb` filename the dump names on the device, if any);
+        local_path (the absolute host path written); and size_bytes.
+
+    Error handling:
+        A non-positive pid raises INVALID_ARGUMENT. No configured
+        local_root, or a local_path escaping it, raises POLICY_DENIED. An
+        unknown serial raises DEVICE_NOT_FOUND. A device that requires root
+        for debuggerd, or refuses it, raises PERMISSION_DENIED. A dead or
+        invalid pid raises BACKEND_ERROR.
+
+    Example:
+        Called with serial="emulator-5554", pid=1224,
+        local_path="sysui.txt". A typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "Saved native tombstone for pid 1224 on emulator-5554 to /data/out/tombstones/sysui.txt.",
+          "data": {
+            "serial": "emulator-5554",
+            "pid": 1224,
+            "process_name": "com.android.systemui",
+            "abi": "x86_64",
+            "signal": "35 (<debuggerd signal>), code -1 (SI_QUEUE from pid 7338, uid 0), fault addr --------",
+            "frame_count": 24,
+            "device_tombstone_ref": "tombstone_27.pb",
+            "local_path": "/data/out/tombstones/sysui.txt",
+            "size_bytes": 18244,
+            "success": true
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    debugging = cast(DebuggingService, services["debugging"])
+    return await debugging.capture_native_tombstone(serial, pid, local_path)

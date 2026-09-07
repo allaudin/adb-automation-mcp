@@ -2,12 +2,36 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any
+
 import pytest
-from fastmcp import Client
+from fastmcp import Client, FastMCP
 
 from adb_automation_mcp.backend.protocol import CommandResult
 from adb_automation_mcp.backend.testing import FakeBackend
+from adb_automation_mcp.modules.debugging.service import DebuggingService
+from adb_automation_mcp.policy import PolicyConfig, PolicyEngine
+from adb_automation_mcp.registry import Registry, discover_modules
 from tests.e2e.test_protocol_e2e import _build_test_server
+
+
+def _server_with_local_root(backend: FakeBackend, local_root: Path | None) -> FastMCP:
+    manifests = discover_modules()
+    registry = Registry(policy=PolicyEngine(PolicyConfig()))
+
+    @asynccontextmanager
+    async def lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
+        services = registry.build_services(backend, manifests)
+        services["debugging"] = DebuggingService(backend, local_root=local_root)
+        yield {"backend": backend, "services": services}
+
+    mcp = FastMCP("test-server", lifespan=lifespan)
+    registry.register_tools(mcp, manifests)
+    registry.register_resources(mcp, manifests)
+    return mcp
 
 
 @pytest.mark.asyncio
@@ -139,3 +163,91 @@ async def test_list_jdwp_processes_tool_device_offline_is_structured_error() -> 
 
     assert result.data.status == "error"
     assert result.data.error.code == "DEVICE_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_capture_native_backtrace_tool_round_trips() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "capture_native_backtrace", {"serial": "emulator-5554", "pid": 1224}
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.process_name == "com.android.systemui"
+    assert result.data.data.thread_count == 2
+
+
+@pytest.mark.asyncio
+async def test_capture_native_backtrace_tool_root_required_is_structured_error() -> None:
+    mcp = _build_test_server(
+        FakeBackend(
+            debuggerd_backtrace_result=CommandResult(
+                stdout="debuggerd: root is required\n", stderr="", exit_code=0, duration_ms=5.0
+            )
+        )
+    )
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "capture_native_backtrace", {"serial": "emulator-5554", "pid": 1224}
+        )
+
+    assert result.data.status == "error"
+    assert result.data.error.code == "PERMISSION_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_capture_native_backtrace_tool_bad_pid_returns_invalid_argument() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "capture_native_backtrace", {"serial": "emulator-5554", "pid": 0}
+        )
+
+    assert result.data.status == "error"
+    assert result.data.error.code == "INVALID_ARGUMENT"
+
+
+@pytest.mark.asyncio
+async def test_capture_native_tombstone_tool_round_trips_with_local_root(tmp_path: Path) -> None:
+    mcp = _server_with_local_root(FakeBackend(), tmp_path)
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "capture_native_tombstone",
+            {"serial": "emulator-5554", "pid": 1224, "local_path": "sysui.txt"},
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.local_path == str(tmp_path / "tombstones" / "sysui.txt")
+    assert result.data.data.frame_count == 24
+    assert result.data.data.device_tombstone_ref == "tombstone_27.pb"
+
+
+@pytest.mark.asyncio
+async def test_capture_native_tombstone_tool_no_local_root_returns_policy_denied(
+    tmp_path: Path,
+) -> None:
+    mcp = _server_with_local_root(FakeBackend(), None)
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "capture_native_tombstone",
+            {"serial": "emulator-5554", "pid": 1224, "local_path": "x.txt"},
+        )
+
+    assert result.data.status == "error"
+    assert result.data.error.code == "POLICY_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_capture_native_tombstone_tool_registered_without_gate() -> None:
+    mcp = _build_test_server(FakeBackend(), allow_destructive=False)
+
+    async with Client(mcp) as client:
+        tools = {t.name for t in await client.list_tools()}
+
+    assert "capture_native_tombstone" in tools

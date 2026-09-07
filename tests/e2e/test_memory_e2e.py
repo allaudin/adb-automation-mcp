@@ -165,3 +165,80 @@ async def test_capture_heap_dump_tool_no_local_root_returns_policy_denied(tmp_pa
 
     assert result.data.status == "error"
     assert result.data.error.code == "POLICY_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_set_heap_watch_tool_round_trips_without_gate() -> None:
+    mcp = _build_test_server(FakeBackend(), allow_destructive=False)
+
+    async with Client(mcp) as client:
+        tools = {t.name for t in await client.list_tools()}
+        result = await client.call_tool(
+            "set_heap_watch",
+            {"serial": "emulator-5554", "package": "com.example.app", "threshold_bytes": 268435456},
+        )
+
+    assert "set_heap_watch" in tools
+    assert result.data.status == "success"
+    assert result.data.data.threshold_bytes == 268435456
+
+
+@pytest.mark.asyncio
+async def test_set_heap_watch_tool_non_positive_threshold_returns_invalid_argument() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "set_heap_watch",
+            {"serial": "emulator-5554", "package": "com.x", "threshold_bytes": 0},
+        )
+
+    assert result.data.status == "error"
+    assert result.data.error.code == "INVALID_ARGUMENT"
+
+
+@pytest.mark.asyncio
+async def test_clear_heap_watch_tool_round_trips() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "clear_heap_watch", {"serial": "emulator-5554", "package": "com.example.app"}
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.cleared is True
+
+
+@pytest.mark.asyncio
+async def test_get_memory_maps_tool_round_trips() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "get_memory_maps", {"serial": "emulator-5554", "pid": 1224}
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.pss_kb == 127651
+    assert result.data.data.swap_kb == 8
+
+
+@pytest.mark.asyncio
+async def test_get_memory_maps_tool_permission_denied_is_structured_error() -> None:
+    mcp = _build_test_server(
+        FakeBackend(
+            smaps_rollup_result=CommandResult(
+                stdout="cat: /proc/1/smaps_rollup: Permission denied\n",
+                stderr="",
+                exit_code=0,
+                duration_ms=5.0,
+            )
+        )
+    )
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("get_memory_maps", {"serial": "emulator-5554", "pid": 1})
+
+    assert result.data.status == "error"
+    assert result.data.error.code == "PERMISSION_DENIED"

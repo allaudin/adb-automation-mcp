@@ -13,8 +13,11 @@ from fastmcp import Context
 from adb_automation_mcp.modules.memory.service import (
     AppMemoryDetails,
     AppMemorySummary,
+    ClearHeapWatchResult,
     HeapDumpResult,
+    HeapWatchResult,
     MemoryHistory,
+    MemoryMaps,
     MemoryService,
     SystemMemorySummary,
 )
@@ -349,3 +352,152 @@ async def capture_heap_dump(
         user_id=user_id,
         timeout_s=timeout_s,
     )
+
+
+@category("write")
+async def set_heap_watch(
+    ctx: Context, serial: str, package: str, threshold_bytes: int
+) -> HeapWatchResult:
+    """Auto-collect a heap dump when a process gets large: `adb shell am
+    set-watch-heap`.
+
+    Tells ActivityManager to watch package's PSS and, once it reaches
+    threshold_bytes, collect a heap dump on the device for later
+    retrieval. Use clear_heap_watch to stop watching. `am` doesn't validate
+    the package, so an unknown one isn't an error. Support varies by
+    Android version.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+        package: The package/process to watch, e.g. "com.example.app".
+        threshold_bytes: PSS threshold in bytes (must be positive), e.g.
+            268435456 for 256 MB.
+
+    Returns:
+        The serial, package, threshold_bytes, and watching (always true on
+        success).
+
+    Error handling:
+        A blank package or a non-positive threshold_bytes raises
+        INVALID_ARGUMENT before anything runs. An unknown serial or
+        unresponsive adb binary raises DEVICE_NOT_FOUND/ADB_UNAVAILABLE. A
+        permission rejection raises PERMISSION_DENIED; a build that doesn't
+        support the command raises BACKEND_ERROR.
+
+    Example:
+        Called with serial="emulator-5554", package="com.example.app",
+        threshold_bytes=268435456. A typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "Watching com.example.app on emulator-5554; a heap dump triggers at 268435456 bytes PSS.",
+          "data": {
+            "serial": "emulator-5554",
+            "package": "com.example.app",
+            "threshold_bytes": 268435456,
+            "watching": true
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    memory = cast(MemoryService, services["memory"])
+    return await memory.set_heap_watch(serial, package, threshold_bytes)
+
+
+@category("write")
+async def clear_heap_watch(ctx: Context, serial: str, package: str) -> ClearHeapWatchResult:
+    """Clear a previously configured heap watch: `adb shell am
+    clear-watch-heap`.
+
+    Undoes set_heap_watch for a package. Idempotent — clearing when nothing
+    is watched is a successful no-op.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+        package: The package whose heap watch to clear, e.g.
+            "com.example.app".
+
+    Returns:
+        The serial, package, and cleared (always true on success).
+
+    Error handling:
+        A blank package raises INVALID_ARGUMENT before anything runs. An
+        unknown serial or unresponsive adb binary raises
+        DEVICE_NOT_FOUND/ADB_UNAVAILABLE. A permission rejection raises
+        PERMISSION_DENIED; any other failure raises BACKEND_ERROR.
+
+    Example:
+        Called with serial="emulator-5554", package="com.example.app". A
+        typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "Cleared the heap watch for com.example.app on emulator-5554.",
+          "data": {"serial": "emulator-5554", "package": "com.example.app", "cleared": true},
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    memory = cast(MemoryService, services["memory"])
+    return await memory.clear_heap_watch(serial, package)
+
+
+@category("read")
+async def get_memory_maps(ctx: Context, serial: str, pid: int) -> MemoryMaps:
+    """Get a process's memory-map aggregates: `adb shell cat
+    /proc/<pid>/smaps_rollup`.
+
+    Returns the kernel's own rollup totals for a process — Rss/Pss, the
+    shared/private clean/dirty split, and swap — all in kilobytes. This is a
+    fixed compact model, not a generic /proc reader. Access may be
+    restricted to root by SELinux on some builds.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+        pid: The process id to inspect (a positive integer — see
+            processes.get_process_id / list_processes).
+
+    Returns:
+        The serial and pid, plus rss_kb / pss_kb / pss_dirty_kb /
+        pss_anon_kb / pss_file_kb / pss_shmem_kb / shared_clean_kb /
+        shared_dirty_kb / private_clean_kb / private_dirty_kb /
+        referenced_kb / anonymous_kb / swap_kb / swap_pss_kb / locked_kb.
+        Any field the kernel didn't emit is null.
+
+    Error handling:
+        A non-positive pid raises INVALID_ARGUMENT. An unknown serial or
+        unresponsive adb binary raises DEVICE_NOT_FOUND/ADB_UNAVAILABLE.
+        smaps_rollup being unreadable (SELinux/root) raises
+        PERMISSION_DENIED; the pid not being a running process raises
+        REMOTE_FILE_NOT_FOUND; output with no recognizable fields raises
+        MEMORY_INFO_UNAVAILABLE.
+
+    Example:
+        Called with serial="emulator-5554", pid=1224. A typical (trimmed)
+        response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "pid 1224 on emulator-5554: 127651 KB PSS.",
+          "data": {
+            "serial": "emulator-5554",
+            "pid": 1224,
+            "rss_kb": 290988,
+            "pss_kb": 127651,
+            "private_dirty_kb": 69252,
+            "shared_clean_kb": 143216,
+            "swap_kb": 8
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    memory = cast(MemoryService, services["memory"])
+    return await memory.get_memory_maps(serial, pid)

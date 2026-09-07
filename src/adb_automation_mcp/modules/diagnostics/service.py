@@ -160,6 +160,12 @@ class DiagnosticsService:
         target = self._resolve_local_path(f"{_BUGREPORT_SUBDIR}/{local_path}")
         target.parent.mkdir(parents=True, exist_ok=True)
 
+        # `adb -s <serial> bugreport` does an implicit wait-for-device, so an
+        # unknown or offline serial makes it block for the whole (deliberately
+        # long) timeout_s instead of failing. Preflight with a cheap device
+        # list so a bad serial fails immediately, like every other tool.
+        await self._require_online_device(serial)
+
         result = await self._backend.bugreport(serial, str(target), timeout_s=timeout_s)
         _raise_for_bugreport_failure(serial, result)
 
@@ -174,6 +180,26 @@ class DiagnosticsService:
             size_bytes=written.stat().st_size if written.is_file() else None,
             success=True,
         )
+
+    async def _require_online_device(self, serial: str) -> None:
+        """Fail fast if serial isn't a currently-usable device.
+
+        Cheap `adb devices` lookup used to guard the long-blocking bugreport
+        call. An unreachable adb binary raises AdbUnavailableError from the
+        backend, which is the correct surface for that case.
+        """
+        devices = await self._backend.list_devices()
+        match = next((d for d in devices if d.serial == serial), None)
+        if match is None:
+            raise DeviceNotFoundError(
+                f"device '{serial}' not found",
+                details={"serial": serial, "known": [d.serial for d in devices]},
+            )
+        if match.state != "device":
+            raise DeviceNotFoundError(
+                f"device '{serial}' is {match.state}, not ready for a bugreport",
+                details={"serial": serial, "state": match.state},
+            )
 
     async def check_adb_available(self) -> AdbAvailability:
         try:

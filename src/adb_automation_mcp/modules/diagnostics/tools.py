@@ -130,10 +130,13 @@ async def generate_bugreport(
     Error handling:
         A blank local_path or an out-of-range timeout_s raises
         INVALID_ARGUMENT. No configured local_root, or a local_path
-        escaping it, raises POLICY_DENIED. An unknown/offline serial or a
-        device that disconnects mid-capture raises DEVICE_NOT_FOUND; the adb
-        binary being unresponsive raises ADB_UNAVAILABLE. Any other non-zero
-        exit raises BACKEND_ERROR.
+        escaping it, raises POLICY_DENIED. An unknown or offline serial is
+        rejected up front (a fast device-list preflight, since `adb
+        bugreport` would otherwise block on an implicit wait-for-device for
+        the whole timeout_s) with DEVICE_NOT_FOUND; a device that
+        disconnects mid-capture also raises DEVICE_NOT_FOUND. The adb binary
+        being unresponsive raises ADB_UNAVAILABLE. Any other non-zero exit
+        raises BACKEND_ERROR.
 
     Example:
         Called with serial="emulator-5554", local_path="device.zip". A

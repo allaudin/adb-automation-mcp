@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 from fastmcp import Client, FastMCP
 
-from adb_automation_mcp.backend.protocol import CommandResult
+from adb_automation_mcp.backend.protocol import CommandResult, DeviceInfo
 from adb_automation_mcp.backend.testing import FakeBackend
 from adb_automation_mcp.modules.diagnostics.service import DiagnosticsService
 from adb_automation_mcp.policy import PolicyConfig, PolicyEngine
@@ -104,7 +104,8 @@ def _server_with_local_root(backend: FakeBackend, local_root: Path | None) -> Fa
 
 @pytest.mark.asyncio
 async def test_generate_bugreport_tool_round_trips_with_local_root(tmp_path: Path) -> None:
-    mcp = _server_with_local_root(FakeBackend(), tmp_path)
+    backend = FakeBackend(devices=[DeviceInfo(serial="emulator-5554", state="device")])
+    mcp = _server_with_local_root(backend, tmp_path)
 
     async with Client(mcp) as client:
         result = await client.call_tool(
@@ -114,6 +115,21 @@ async def test_generate_bugreport_tool_round_trips_with_local_root(tmp_path: Pat
     assert result.data.status == "success"
     assert result.data.data.is_zip is True
     assert result.data.data.local_path == str(tmp_path / "bugreports" / "device.zip")
+
+
+@pytest.mark.asyncio
+async def test_generate_bugreport_tool_unknown_serial_returns_device_not_found(tmp_path: Path) -> None:
+    # unknown serial is rejected by the preflight, not by a wait-for-device stall
+    backend = FakeBackend(devices=[DeviceInfo(serial="emulator-5554", state="device")])
+    mcp = _server_with_local_root(backend, tmp_path)
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "generate_bugreport", {"serial": "ghost-9999", "local_path": "device.zip"}
+        )
+
+    assert result.data.status == "error"
+    assert result.data.error.code == "DEVICE_NOT_FOUND"
 
 
 @pytest.mark.asyncio

@@ -8,10 +8,25 @@ data instead of an error.
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 from pydantic import BaseModel
 
-from adb_automation_mcp.backend.protocol import AdbBackend
-from adb_automation_mcp.errors import AdbTimeoutError, AdbUnavailableError, BackendError
+from adb_automation_mcp.backend.protocol import AdbBackend, CommandResult
+from adb_automation_mcp.errors import (
+    AdbTimeoutError,
+    AdbUnavailableError,
+    BackendError,
+    DeviceNotFoundError,
+    InvalidArgumentError,
+    PolicyViolationError,
+)
+
+_BUGREPORT_SUBDIR = "bugreports"
+_MIN_BUGREPORT_TIMEOUT_S = 60.0
+_MAX_BUGREPORT_TIMEOUT_S = 600.0
+_COPIED_RE = re.compile(r"Bug report copied to (?P<path>.+?)\s*$", re.MULTILINE)
 
 
 class AdbVersionInfo(BaseModel):
@@ -83,14 +98,82 @@ class AdbAvailability(BaseModel):
         return f"adb is not available: {self.reason or 'unknown reason'}"
 
 
+class BugreportResult(BaseModel):
+    """Outcome of `adb -s <serial> bugreport <local_path>`.
+
+    local_path is the absolute path the bugreport was written to on this
+    server's host. is_zip is True for the modern zipped form (the common
+    case); a legacy text bugreport comes back is_zip=False. size_bytes is
+    the saved file size, or null if it couldn't be stat'd. Only ever
+    returned on success.
+    """
+
+    serial: str
+    local_path: str
+    is_zip: bool
+    size_bytes: int | None
+    success: bool
+
+    def summary(self) -> str:
+        kind = "zip" if self.is_zip else "text"
+        return f"Saved {kind} bugreport from {self.serial} to {self.local_path}."
+
+
 class DiagnosticsService:
     """Health-check and introspection logic for the adb connection itself, as
     opposed to any particular device — the thing to call first when something
     else on this server is failing or behaving unexpectedly.
     """
 
-    def __init__(self, backend: AdbBackend) -> None:
+    def __init__(self, backend: AdbBackend, local_root: Path | None = None) -> None:
         self._backend = backend
+        self._local_root = local_root.resolve() if local_root is not None else None
+
+    def _resolve_local_path(self, rel: str) -> Path:
+        if self._local_root is None:
+            raise PolicyViolationError(
+                "No local_root configured for this server — generate_bugreport "
+                "cannot write to the host. Set ADB_AUTOMATION_LOCAL_ROOT.",
+                details={"local_path": rel},
+            )
+        resolved = (self._local_root / rel).resolve()
+        if not resolved.is_relative_to(self._local_root):
+            raise PolicyViolationError(
+                f"local_path '{rel}' resolves outside the configured local_root.",
+                details={"local_path": rel, "local_root": str(self._local_root)},
+            )
+        return resolved
+
+    async def generate_bugreport(
+        self, serial: str, local_path: str, timeout_s: float = 300.0
+    ) -> BugreportResult:
+        if not local_path.strip():
+            raise InvalidArgumentError(
+                "local_path must be a non-empty path.", details={"local_path": local_path}
+            )
+        if not _MIN_BUGREPORT_TIMEOUT_S <= timeout_s <= _MAX_BUGREPORT_TIMEOUT_S:
+            raise InvalidArgumentError(
+                f"timeout_s must be between {_MIN_BUGREPORT_TIMEOUT_S} and "
+                f"{_MAX_BUGREPORT_TIMEOUT_S} seconds.",
+                details={"serial": serial, "timeout_s": timeout_s},
+            )
+        target = self._resolve_local_path(f"{_BUGREPORT_SUBDIR}/{local_path}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        result = await self._backend.bugreport(serial, str(target), timeout_s=timeout_s)
+        _raise_for_bugreport_failure(serial, result)
+
+        copied = _COPIED_RE.search(f"{result.stdout}\n{result.stderr}")
+        written = Path(copied.group("path")) if copied else target
+        if not written.is_file() and target.with_suffix(".zip").is_file():
+            written = target.with_suffix(".zip")
+        return BugreportResult(
+            serial=serial,
+            local_path=str(written),
+            is_zip=written.suffix == ".zip",
+            size_bytes=written.stat().st_size if written.is_file() else None,
+            success=True,
+        )
 
     async def check_adb_available(self) -> AdbAvailability:
         try:
@@ -113,3 +196,12 @@ class DiagnosticsService:
             message = (result.stderr or result.stdout).strip() or "adb version exited non-zero."
             raise BackendError(message, details={"exit_code": result.exit_code})
         return _parse_adb_version(result.stdout)
+
+
+def _raise_for_bugreport_failure(serial: str, result: CommandResult) -> None:
+    if result.exit_code == 0:
+        return
+    message = (result.stderr or result.stdout).strip() or "adb bugreport exited non-zero."
+    if "not found" in message or "no devices/emulators found" in message or "offline" in message:
+        raise DeviceNotFoundError(message, details={"serial": serial})
+    raise BackendError(message, details={"serial": serial, "exit_code": result.exit_code})

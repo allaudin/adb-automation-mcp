@@ -4,11 +4,19 @@ registration, no event-loop server startup, just the service.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from adb_automation_mcp.backend.protocol import CommandResult, DeviceInfo
 from adb_automation_mcp.backend.testing import FakeBackend
-from adb_automation_mcp.errors import AdbUnavailableError, BackendError
+from adb_automation_mcp.errors import (
+    AdbUnavailableError,
+    BackendError,
+    DeviceNotFoundError,
+    InvalidArgumentError,
+    PolicyViolationError,
+)
 from adb_automation_mcp.modules.diagnostics.service import AdbVersionInfo, DiagnosticsService
 
 
@@ -158,3 +166,96 @@ def test_adb_version_info_summary_prefers_platform_tools_then_bridge() -> None:
     ).summary()
     assert "bridge version 1.0.41" in AdbVersionInfo(raw="", bridge_version="1.0.41").summary()
     assert "no recognizable version line" in AdbVersionInfo(raw="junk").summary()
+
+
+# --- generate_bugreport ------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_generate_bugreport__zip_success(tmp_path: Path) -> None:
+    service = DiagnosticsService(FakeBackend(), local_root=tmp_path)
+
+    result = await service.generate_bugreport("emulator-5554", "device.zip")
+
+    assert result.success is True
+    assert result.is_zip is True
+    assert result.local_path == str(tmp_path / "bugreports" / "device.zip")
+    assert result.size_bytes is not None and result.size_bytes > 0
+
+
+@pytest.mark.asyncio
+async def test_generate_bugreport__no_extension_gets_zip(tmp_path: Path) -> None:
+    service = DiagnosticsService(FakeBackend(), local_root=tmp_path)
+
+    result = await service.generate_bugreport("emulator-5554", "device")
+
+    assert result.local_path == str(tmp_path / "bugreports" / "device.zip")
+    assert result.is_zip is True
+
+
+@pytest.mark.asyncio
+async def test_generate_bugreport__no_local_root_raises_policy() -> None:
+    with pytest.raises(PolicyViolationError):
+        await DiagnosticsService(FakeBackend(), local_root=None).generate_bugreport(
+            "emulator-5554", "device.zip"
+        )
+
+
+@pytest.mark.asyncio
+async def test_generate_bugreport__path_traversal_rejected(tmp_path: Path) -> None:
+    with pytest.raises(PolicyViolationError):
+        await DiagnosticsService(FakeBackend(), local_root=tmp_path).generate_bugreport(
+            "emulator-5554", "../../escape.zip"
+        )
+
+
+@pytest.mark.asyncio
+async def test_generate_bugreport__blank_path_rejected(tmp_path: Path) -> None:
+    with pytest.raises(InvalidArgumentError):
+        await DiagnosticsService(FakeBackend(), local_root=tmp_path).generate_bugreport(
+            "emulator-5554", "  "
+        )
+
+
+@pytest.mark.asyncio
+async def test_generate_bugreport__bad_timeout_rejected(tmp_path: Path) -> None:
+    with pytest.raises(InvalidArgumentError):
+        await DiagnosticsService(FakeBackend(), local_root=tmp_path).generate_bugreport(
+            "emulator-5554", "device.zip", timeout_s=5
+        )
+
+
+@pytest.mark.asyncio
+async def test_generate_bugreport__adb_failure_disconnect_raises_device_not_found(
+    tmp_path: Path,
+) -> None:
+    backend = FakeBackend(
+        bugreport_result=CommandResult(
+            stdout="", stderr="error: no devices/emulators found\n", exit_code=1, duration_ms=10.0
+        )
+    )
+    with pytest.raises(DeviceNotFoundError):
+        await DiagnosticsService(backend, local_root=tmp_path).generate_bugreport(
+            "emulator-5554", "device.zip"
+        )
+
+
+@pytest.mark.asyncio
+async def test_generate_bugreport__adb_failure_other_raises_backend_error(tmp_path: Path) -> None:
+    backend = FakeBackend(
+        bugreport_result=CommandResult(
+            stdout="", stderr="something broke\n", exit_code=1, duration_ms=10.0
+        )
+    )
+    with pytest.raises(BackendError):
+        await DiagnosticsService(backend, local_root=tmp_path).generate_bugreport(
+            "emulator-5554", "device.zip"
+        )
+
+
+@pytest.mark.asyncio
+async def test_generate_bugreport__backend_unavailable(tmp_path: Path) -> None:
+    with pytest.raises(AdbUnavailableError):
+        await DiagnosticsService(FakeBackend(unavailable=True), local_root=tmp_path).generate_bugreport(
+            "emulator-5554", "device.zip"
+        )

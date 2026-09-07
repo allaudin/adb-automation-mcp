@@ -280,6 +280,15 @@ class ProcessMemoryUnavailableError(AdbError):
     code = "PROCESS_MEMORY_UNAVAILABLE"
 
 
+class TracingUnavailableError(AdbError):
+    """`perfetto` isn't available on this device (e.g. "perfetto: not found",
+    or the tracing service can't be reached) — a platform/build limitation,
+    not a transport failure and not a bad request.
+    """
+
+    code = "TRACING_UNAVAILABLE"
+
+
 class NetworkToolUnavailableError(AdbError):
     """The `ip` command used to enumerate network interfaces isn't
     available on this device (e.g. "ip: not found") — a tool/environment

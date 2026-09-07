@@ -141,3 +141,42 @@ async def test_capture_system_trace_tool_perfetto_unavailable_is_structured_erro
 
     assert result.data.status == "error"
     assert result.data.error.code == "TRACING_UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_start_ipc_trace_tool_round_trips_without_gate() -> None:
+    mcp = _build_test_server(FakeBackend(), allow_destructive=False)
+
+    async with Client(mcp) as client:
+        tools = {t.name for t in await client.list_tools()}
+        result = await client.call_tool("start_ipc_trace", {"serial": "emulator-5554"})
+
+    assert "start_ipc_trace" in tools
+    assert result.data.status == "success"
+    assert result.data.data.tracing is True
+
+
+@pytest.mark.asyncio
+async def test_stop_ipc_trace_tool_round_trips_with_local_root(tmp_path: Path) -> None:
+    mcp = _server_with_local_root(FakeBackend(), tmp_path)
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "stop_ipc_trace", {"serial": "emulator-5554", "local_path": "ipc.txt"}
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.local_path == str(tmp_path / "ipc_traces" / "ipc.txt")
+
+
+@pytest.mark.asyncio
+async def test_stop_ipc_trace_tool_no_local_root_returns_policy_denied(tmp_path: Path) -> None:
+    mcp = _server_with_local_root(FakeBackend(), None)
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "stop_ipc_trace", {"serial": "emulator-5554", "local_path": "ipc.txt"}
+        )
+
+    assert result.data.status == "error"
+    assert result.data.error.code == "POLICY_DENIED"

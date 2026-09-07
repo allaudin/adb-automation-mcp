@@ -10,7 +10,11 @@ from pathlib import Path
 
 from adb_automation_mcp.backend.protocol import AdbBackend
 from adb_automation_mcp.modules.tracing.service import TracingService
-from adb_automation_mcp.modules.tracing.tools import capture_system_trace
+from adb_automation_mcp.modules.tracing.tools import (
+    capture_system_trace,
+    start_ipc_trace,
+    stop_ipc_trace,
+)
 from adb_automation_mcp.registry import ModuleManifest
 
 
@@ -26,6 +30,6 @@ def _service_factory(backend: AdbBackend) -> TracingService:
 MODULE = ModuleManifest(
     name="tracing",
     service_factory=_service_factory,
-    tools=[capture_system_trace],
+    tools=[capture_system_trace, start_ipc_trace, stop_ipc_trace],
     resources=[],
 )

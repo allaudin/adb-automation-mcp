@@ -193,3 +193,79 @@ async def test_capture_system_trace__backend_unavailable(tmp_path: Path) -> None
         await TracingService(FakeBackend(unavailable=True), local_root=tmp_path).capture_system_trace(
             "emulator-5554", "cpu", "x.perfetto-trace"
         )
+
+
+# --- start_ipc_trace / stop_ipc_trace -------------------------------
+
+
+
+@pytest.mark.asyncio
+async def test_start_ipc_trace__command_and_confirm(tmp_path: Path) -> None:
+    backend = RecordingBackend()
+
+    result = await TracingService(backend, local_root=tmp_path).start_ipc_trace("emulator-5554")
+
+    assert backend.commands == ["am trace-ipc start"]
+    assert result.tracing is True
+
+
+@pytest.mark.asyncio
+async def test_start_ipc_trace__error_output_raises_backend_error(tmp_path: Path) -> None:
+    backend = FakeBackend(trace_ipc_start_result=_cr(stdout="Error: cannot start\n"))
+    with pytest.raises(BackendError):
+        await TracingService(backend, local_root=tmp_path).start_ipc_trace("emulator-5554")
+
+
+@pytest.mark.asyncio
+async def test_start_ipc_trace__unknown_serial(tmp_path: Path) -> None:
+    backend = FakeBackend(
+        trace_ipc_start_result=_cr(stderr="adb: device 'bogus' not found\n", exit_code=1)
+    )
+    with pytest.raises(DeviceNotFoundError):
+        await TracingService(backend, local_root=tmp_path).start_ipc_trace("bogus")
+
+
+@pytest.mark.asyncio
+async def test_stop_ipc_trace__stop_dump_pull_cleanup(tmp_path: Path) -> None:
+    backend = RecordingBackend()
+
+    result = await TracingService(backend, local_root=tmp_path).stop_ipc_trace("emulator-5554", "ipc.txt")
+
+    stop_cmd = next(c for c in backend.commands if c.startswith("am trace-ipc stop"))
+    assert "--dump-file /data/local/tmp/adb_automation_mcp_ipctrace_" in stop_cmd
+    assert any(c.startswith("rm -f /data/local/tmp/adb_automation_mcp_ipctrace_") for c in backend.commands)
+    assert result.local_path == str(tmp_path / "ipc_traces" / "ipc.txt")
+    assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_stop_ipc_trace__no_local_root_raises_policy() -> None:
+    with pytest.raises(PolicyViolationError):
+        await TracingService(FakeBackend(), local_root=None).stop_ipc_trace("emulator-5554", "ipc.txt")
+
+
+@pytest.mark.asyncio
+async def test_stop_ipc_trace__path_traversal_rejected(tmp_path: Path) -> None:
+    with pytest.raises(PolicyViolationError):
+        await TracingService(FakeBackend(), local_root=tmp_path).stop_ipc_trace(
+            "emulator-5554", "../../escape.txt"
+        )
+
+
+@pytest.mark.asyncio
+async def test_stop_ipc_trace__no_active_trace_raises(tmp_path: Path) -> None:
+    backend = FakeBackend(trace_ipc_stop_result=_cr(stdout="Error: No ongoing IPC tracing\n"))
+    with pytest.raises(BackendError):
+        await TracingService(backend, local_root=tmp_path).stop_ipc_trace("emulator-5554", "ipc.txt")
+
+
+@pytest.mark.asyncio
+async def test_stop_ipc_trace__pull_failure_cleans_up(tmp_path: Path) -> None:
+    class FailingPull(RecordingBackend):
+        async def pull(self, serial: str, remote_path: str, local_path: str) -> CommandResult:
+            return _cr(stderr="adb: error: remote object does not exist\n", exit_code=1)
+
+    backend = FailingPull()
+    with pytest.raises(RemoteFileNotFoundError):
+        await TracingService(backend, local_root=tmp_path).stop_ipc_trace("emulator-5554", "ipc.txt")
+    assert any(c.startswith("rm -f /data/local/tmp/adb_automation_mcp_ipctrace_") for c in backend.commands)

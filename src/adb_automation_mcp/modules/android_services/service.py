@@ -1,9 +1,9 @@
 """Domain logic for the android_services module: starting Android services,
 both ordinary (`adb shell am start-service`) and foreground
-(`adb shell am start-foreground-service`) — named android_services, not
-services, to avoid colliding with this project's own `services` concept (the
-per-module domain service instances the registry builds). Stopping a service
-isn't implemented yet.
+(`adb shell am start-foreground-service`), and stopping one
+(`adb shell am stop-service`) — named android_services, not services, to
+avoid colliding with this project's own `services` concept (the per-module
+domain service instances the registry builds).
 """
 
 from __future__ import annotations
@@ -71,11 +71,96 @@ class StartForegroundServiceResult(BaseModel):
         return f"Started foreground service {self.component} on {self.serial}."
 
 
+class StopServiceResult(BaseModel):
+    """Outcome of stopping an Android Service (`adb shell am stop-service`).
+
+    `am` prints "Stopping service: Intent { ... }" then one of "Service
+    stopped" or "Service not stopped: was not running." — the latter at a
+    non-zero exit on some builds (verified live: exit 255 on a car AVD), but
+    still a valid answer, not a tool error. stopped is True only for the first;
+    was_running mirrors it (True stopped it, False it wasn't running, None if
+    `am` gave an outcome this parser doesn't recognize).
+
+    Note `am stop-service` cannot distinguish "no such service component" from
+    "known component, not currently running" — both report "was not running." —
+    so an unknown component comes back as stopped=False/was_running=False, not
+    COMPONENT_NOT_FOUND (only a malformed component name does).
+    """
+
+    serial: str
+    component: str
+    user_id: int | None
+    stopped: bool
+    was_running: bool | None
+    output: str
+
+    def summary(self) -> str:
+        if self.stopped:
+            return f"Stopped service {self.component} on {self.serial}."
+        if self.was_running is False:
+            return f"Service {self.component} on {self.serial} was not running."
+        return f"Service {self.component} on {self.serial}: stop dispatched, outcome unrecognized."
+
+
 class AndroidServicesService:
-    """Starts Android services (ordinary and foreground) on a connected device."""
+    """Starts Android services (ordinary and foreground) and stops them on a
+    connected device.
+    """
 
     def __init__(self, backend: AdbBackend) -> None:
         self._backend = backend
+
+    async def stop_service(
+        self, serial: str, component: str, user_id: int | None = None
+    ) -> StopServiceResult:
+        if not component.strip():
+            raise InvalidArgumentError(
+                "component must not be empty.", details={"serial": serial}
+            )
+        if user_id is not None and user_id < 0:
+            raise InvalidArgumentError(
+                "user_id must be a non-negative integer.",
+                details={"serial": serial, "user_id": user_id},
+            )
+
+        parts = ["am", "stop-service", "-n", shlex.quote(component)]
+        if user_id is not None:
+            parts.extend(["--user", str(user_id)])
+
+        result = await self._backend.shell(serial, " ".join(parts))
+        combined = _check_common_service_errors(serial, component, result)
+
+        lowered = combined.lower()
+        if "service stopped" in lowered:
+            stopped, was_running = True, True
+        elif "was not running" in lowered:
+            stopped, was_running = False, False
+        else:
+            error_line = _ERROR_LINE_RE.search(combined)
+            if error_line is not None:
+                raise BackendError(
+                    error_line.group("message").strip(),
+                    details={"serial": serial, "component": component},
+                )
+            if result.exit_code != 0 and "Stopping service:" not in combined:
+                raise BackendError(
+                    (result.stderr or result.stdout).strip() or "am stop-service failed.",
+                    details={
+                        "serial": serial,
+                        "component": component,
+                        "exit_code": result.exit_code,
+                    },
+                )
+            stopped, was_running = False, None
+
+        return StopServiceResult(
+            serial=serial,
+            component=component,
+            user_id=user_id,
+            stopped=stopped,
+            was_running=was_running,
+            output=result.stdout,
+        )
 
     async def start_service(
         self, serial: str, component: str, user_id: int | None = None
@@ -119,24 +204,40 @@ class AndroidServicesService:
         return result
 
 
-def _raise_for_start_service_failure(serial: str, component: str, result: CommandResult) -> None:
+def _check_common_service_errors(
+    serial: str, component: str, result: CommandResult
+) -> str:
+    """Raise for the failure shapes shared by `am start-service` /
+    `am start-foreground-service` / `am stop-service`. Returns the combined
+    stdout+stderr for the caller to inspect the command-specific outcome.
+    """
     combined = f"{result.stdout}\n{result.stderr}"
-    # `am`'s own component-name parser (Am.java, shared with `am start`/
-    # `am broadcast`) rejects a malformed -n argument (not "package/class"
-    # shape) before ever calling ActivityManagerService. On some builds this is
-    # exit 1 with "Error: Bad component name: ..."; on this project's car AVD
-    # it's a "java.lang.IllegalArgumentException: Bad component name: ..." stack
-    # trace at exit 0 — check regardless of exit code.
+    # `am`'s own component-name parser (Am.java, shared across am subcommands)
+    # rejects a malformed -n argument before ever calling ActivityManagerService.
+    # On some builds this is exit 1 with "Error: Bad component name: ..."; on
+    # this project's car AVD it's a "java.lang.IllegalArgumentException: Bad
+    # component name: ..." stack trace at exit 0 — check regardless of exit code.
     if "Bad component name" in combined:
         raise ComponentNotFoundError(
             _first_line_containing(combined, "Bad component name"),
             details={"serial": serial, "component": component},
         )
-
     # An unknown serial fails at the adb-client layer before `am` runs.
     adb_msg = (result.stderr or result.stdout).strip()
     if adb_msg.startswith("adb:") and "not found" in adb_msg:
         raise DeviceNotFoundError(adb_msg, details={"serial": serial})
+    # A SecurityException reaching the shell as an uncaught RemoteException
+    # (e.g. lacking INTERACT_ACROSS_USERS for --user) — same substring
+    # convention as broadcasts/activities.
+    if "Permission Denial" in combined:
+        raise PermissionDeniedError(
+            adb_msg or "Permission Denial", details={"serial": serial, "component": component}
+        )
+    return combined
+
+
+def _raise_for_start_service_failure(serial: str, component: str, result: CommandResult) -> None:
+    combined = _check_common_service_errors(serial, component, result)
 
     # `am`'s runStartService reports every business-logic outcome — a
     # well-formed component matching no declared service, a missing-permission
@@ -164,17 +265,9 @@ def _raise_for_start_service_failure(serial: str, component: str, result: Comman
             )
         raise BackendError(message, details={"serial": serial, "component": component})
 
-    # A SecurityException reaching the shell as an uncaught RemoteException
-    # (e.g. lacking INTERACT_ACROSS_USERS for --user) — same substring
-    # convention as broadcasts/activities.
-    if "Permission Denial" in combined:
-        raise PermissionDeniedError(
-            adb_msg or "Permission Denial", details={"serial": serial, "component": component}
-        )
-
     if result.exit_code != 0:
         raise BackendError(
-            adb_msg or "adb shell command exited non-zero.",
+            (result.stderr or result.stdout).strip() or "adb shell command exited non-zero.",
             details={"serial": serial, "component": component, "exit_code": result.exit_code},
         )
 

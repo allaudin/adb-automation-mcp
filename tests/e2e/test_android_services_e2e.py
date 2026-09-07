@@ -223,3 +223,84 @@ async def test_start_foreground_service_tool_is_registered() -> None:
         names = {tool.name for tool in await client.list_tools()}
 
     assert "start_foreground_service" in names
+
+
+# --- stop_service ----------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_stop_service_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "stop_service",
+            {"serial": "emulator-5554", "component": "com.example.app/.MyService"},
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.stopped is True
+    assert result.data.data.was_running is True
+
+
+@pytest.mark.asyncio
+async def test_stop_service_tool_not_running_serializes_as_stopped_false() -> None:
+    mcp = _build_test_server(
+        FakeBackend(
+            stop_service_result=CommandResult(
+                stdout=(
+                    "Stopping service: Intent { cmp=com.example.app/.MyService }\n"
+                    "Service not stopped: was not running.\n"
+                ),
+                stderr="",
+                exit_code=255,
+                duration_ms=5.0,
+            )
+        )
+    )
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "stop_service",
+            {"serial": "emulator-5554", "component": "com.example.app/.MyService"},
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.stopped is False
+    assert result.data.data.was_running is False
+
+
+@pytest.mark.asyncio
+async def test_stop_service_tool_malformed_component_returns_component_not_found() -> None:
+    mcp = _build_test_server(
+        FakeBackend(
+            stop_service_result=CommandResult(
+                stdout="",
+                stderr=(
+                    "\nException occurred while executing 'stop-service':\n"
+                    "java.lang.IllegalArgumentException: Bad component name: nope\n"
+                ),
+                exit_code=0,
+                duration_ms=5.0,
+            )
+        )
+    )
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "stop_service", {"serial": "emulator-5554", "component": "nope"}
+        )
+
+    assert result.data.status == "error"
+    assert result.data.error is not None
+    assert result.data.error.code == "COMPONENT_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_stop_service_tool_is_registered() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        names = {tool.name for tool in await client.list_tools()}
+
+    assert "stop_service" in names

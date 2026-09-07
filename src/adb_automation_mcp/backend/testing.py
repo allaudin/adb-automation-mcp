@@ -119,6 +119,7 @@ class FakeBackend:
         dumpsys_activity_activities_result: CommandResult | None = None,
         start_service_result: CommandResult | None = None,
         start_foreground_service_result: CommandResult | None = None,
+        stop_service_result: CommandResult | None = None,
         force_stop_result: CommandResult | None = None,
         pull_result: CommandResult | None = None,
         forward_result: CommandResult | None = None,
@@ -604,6 +605,19 @@ class FakeBackend:
             exit_code=0,
             duration_ms=150.0,
         )
+        # `adb shell am stop-service` — "Stopping service: Intent { ... }" then
+        # "Service stopped" (success, exit 0) or "Service not stopped: was not
+        # running." (exit 255 on the car AVD; still a valid outcome). Default
+        # fixture: the running-and-stopped path.
+        self._stop_service_result = stop_service_result or CommandResult(
+            stdout=(
+                "Stopping service: Intent { cmp=com.example.app/.MyService }\n"
+                "Service stopped\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=110.0,
+        )
         # `adb shell am force-stop` — the well-documented, long-stable AOSP
         # behavior: no stdout at all on success. Not captured from a live
         # device in this environment (none was available); same caveat as
@@ -933,6 +947,8 @@ class FakeBackend:
             return self._start_service_result
         if command.startswith("am start-foreground-service "):
             return self._start_foreground_service_result
+        if command.startswith("am stop-service "):
+            return self._stop_service_result
         if command.startswith("cmd package resolve-activity"):
             return self._resolve_activity_result
         if command == "dumpsys activity activities":

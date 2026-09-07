@@ -16,6 +16,7 @@ import re
 import shlex
 import uuid
 from contextlib import suppress
+from datetime import datetime, timezone
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -32,12 +33,17 @@ from adb_automation_mcp.errors import (
 )
 
 _TRACE_SUBDIR = "traces"
+_IPC_TRACE_SUBDIR = "ipc_traces"
+_REMOTE_TMP_DIR = "/data/local/tmp"
 # perfetto's own domain can write here; /data/local/tmp is SELinux-denied to it.
 _REMOTE_TRACE_DIR = "/data/misc/perfetto-traces"
 _MIN_DURATION_S = 1
 _MAX_DURATION_S = 120
 _BUFFER = "32mb"
 _TIMEOUT_SLACK_S = 25.0
+# `am trace-ipc stop` RPCs into every process to collect its transaction log
+# and can take well over a minute on a busy device.
+_IPC_STOP_TIMEOUT_S = 180.0
 
 # preset -> the atrace categories / ftrace events passed as perfetto light-config
 # tokens. Kept small and widely-supported; unknown tokens perfetto just skips.
@@ -82,8 +88,44 @@ class SystemTraceResult(BaseModel):
         )
 
 
+class IpcTraceSession(BaseModel):
+    """State returned by start_ipc_trace (`adb shell am trace-ipc start`).
+
+    Starting produces no artifact — the Binder/IPC transaction dump is
+    written by stop_ipc_trace. tracing is always true when start succeeds;
+    `am` doesn't report whether a session was already running (starting
+    again is harmless), so this doesn't distinguish that.
+    """
+
+    serial: str
+    tracing: bool
+
+    def summary(self) -> str:
+        return f"Started IPC transaction tracing on {self.serial}."
+
+
+class IpcTraceResult(BaseModel):
+    """Outcome of stop_ipc_trace: the dumped IPC trace saved to the host
+    (`adb shell am trace-ipc stop --dump-file <dev>` + `adb pull`).
+
+    local_path is the absolute path the (text) trace was written to on this
+    server's host. size_bytes is its size on disk, or null if it couldn't
+    be stat'd. Only ever returned on success.
+    """
+
+    serial: str
+    local_path: str
+    size_bytes: int | None
+    success: bool
+
+    def summary(self) -> str:
+        return f"Saved IPC transaction trace from {self.serial} to {self.local_path}."
+
+
 class TracingService:
-    """Captures bounded Perfetto system traces and saves them to the host."""
+    """Captures Perfetto system traces and Binder/IPC transaction traces and
+    saves them to the host.
+    """
 
     def __init__(self, backend: AdbBackend, local_root: Path | None = None) -> None:
         self._backend = backend
@@ -160,6 +202,48 @@ class TracingService:
             size_bytes=size_bytes,
             success=True,
         )
+
+    async def start_ipc_trace(self, serial: str) -> IpcTraceSession:
+        result = await self._backend.shell(serial, "am trace-ipc start")
+        _raise_for_am_failure(serial, result, "am trace-ipc start")
+        return IpcTraceSession(serial=serial, tracing=True)
+
+    async def stop_ipc_trace(self, serial: str, local_path: str) -> IpcTraceResult:
+        target = self._resolve_local_path(f"{_IPC_TRACE_SUBDIR}/{local_path}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        remote_path = f"{_REMOTE_TMP_DIR}/adb_automation_mcp_ipctrace_{stamp}_{uuid.uuid4().hex}.txt"
+
+        try:
+            stop_result = await self._backend.shell(
+                serial,
+                f"am trace-ipc stop --dump-file {shlex.quote(remote_path)}",
+                timeout_s=_IPC_STOP_TIMEOUT_S,
+            )
+            _raise_for_am_failure(serial, stop_result, "am trace-ipc stop")
+
+            pull_result = await self._backend.pull(serial, remote_path, str(target))
+            _raise_for_pull_failure(serial, remote_path, pull_result)
+        finally:
+            with suppress(Exception):
+                await self._backend.shell(serial, f"rm -f {shlex.quote(remote_path)}")
+
+        size_bytes = target.stat().st_size if target.is_file() else None
+        return IpcTraceResult(
+            serial=serial, local_path=str(target), size_bytes=size_bytes, success=True
+        )
+
+
+def _raise_for_am_failure(serial: str, result: CommandResult, what: str) -> None:
+    combined = f"{result.stdout}\n{result.stderr}"
+    if "Permission denied" in combined or "Permission Denial" in combined:
+        raise PermissionDeniedError(f"{what} was refused.", details={"serial": serial})
+    if result.exit_code == 0 and "Error:" not in combined:
+        return
+    message = (result.stderr or result.stdout).strip() or f"{what} exited non-zero."
+    if message.startswith("adb:") and "not found" in message:
+        raise DeviceNotFoundError(message, details={"serial": serial})
+    raise BackendError(message, details={"serial": serial, "exit_code": result.exit_code})
 
 
 def _raise_for_perfetto_failure(serial: str, result: CommandResult) -> None:

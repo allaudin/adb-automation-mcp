@@ -53,6 +53,7 @@ nav:
       - network: reference/network.md
       - permissions: reference/permissions.md
       - power: reference/power.md
+      - profiling: reference/profiling.md
       - processes: reference/processes.md
       - screen: reference/screen.md
       - settings: reference/settings.md

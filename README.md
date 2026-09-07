@@ -84,7 +84,7 @@ uv run mkdocs build --strict   # docs site
 
 ## Tools
 
-**102 tools.** Full signatures, docstrings, and worked examples are in the
+**106 tools.** Full signatures, docstrings, and worked examples are in the
 [tool reference](https://allaudin.github.io/adb-automation-mcp/reference/diagnostics/).
 Tools marked † are `destructive` — not registered unless
 `ADB_AUTOMATION_ALLOW_DESTRUCTIVE=1`.
@@ -117,10 +117,11 @@ Tools marked † are `destructive` — not registered unless
 | `port_forwarding` (6) | `create_forward`, `list_forwards`, `remove_forward`, `create_reverse`, `list_reverses`, `remove_reverse` |
 | `power` (3) | `get_power_state`, `reboot_device`†, `wake_device` |
 | `processes` (5) | `force_stop_app`, `kill_background_processes`, `list_processes`, `get_process_id`, `get_process_memory` |
+| `profiling` (2) | `start_method_profile`, `stop_method_profile` |
 | `screen` (2) | `take_screenshot`, `record_screen` |
 | `settings` (2) | `get_setting`, `set_setting` |
 | `system_properties` (4) | `get_property`, `list_properties`, `get_property_metadata`, `set_property` |
-| `tracing` (1) | `capture_system_trace` |
+| `tracing` (3) | `capture_system_trace`, `start_ipc_trace`, `stop_ipc_trace` |
 | `ui` (3) | `dump_ui_hierarchy`, `find_ui_elements`, `wait_for_ui_element` |
 | `user` (11) | `get_current_user`, `dump_user`, `user_info`, `list_users`, `switch_user`, `create_user`, `remove_user`†, `get_user_capabilities`, `start_user`, `is_user_stopped`, `get_user_state` |
 <!-- /stats:tools-table -->

@@ -143,6 +143,10 @@ class FakeBackend:
         set_debug_app_result: CommandResult | None = None,
         clear_debug_app_result: CommandResult | None = None,
         jdwp_result: CommandResult | None = None,
+        am_profile_start_result: CommandResult | None = None,
+        am_profile_stop_result: CommandResult | None = None,
+        trace_ipc_start_result: CommandResult | None = None,
+        trace_ipc_stop_result: CommandResult | None = None,
         gfxinfo_framestats_result: CommandResult | None = None,
         gfxinfo_reset_result: CommandResult | None = None,
         perfetto_result: CommandResult | None = None,
@@ -1154,6 +1158,27 @@ class FakeBackend:
         self._jdwp_result = jdwp_result or CommandResult(
             stdout="1224\n1568\n2411\n", stderr="", exit_code=0, duration_ms=1500.0
         )
+        # `adb shell am profile start [opts] <proc> <file>` / `am profile stop
+        # [opts] <proc>` — both silent, exit 0 (verified live on a car AVD; the
+        # .trace file is written at the path passed to `start`).
+        self._am_profile_start_result = am_profile_start_result or CommandResult(
+            stdout="", stderr="", exit_code=0, duration_ms=60.0
+        )
+        self._am_profile_stop_result = am_profile_stop_result or CommandResult(
+            stdout="", stderr="", exit_code=0, duration_ms=80.0
+        )
+        # `adb shell am trace-ipc start` / `am trace-ipc stop --dump-file <f>` —
+        # verified live: "Starting IPC tracing." / "Stopped IPC tracing. Dumping
+        # logs to: <f>", exit 0.
+        self._trace_ipc_start_result = trace_ipc_start_result or CommandResult(
+            stdout="Starting IPC tracing.\n", stderr="", exit_code=0, duration_ms=40.0
+        )
+        self._trace_ipc_stop_result = trace_ipc_stop_result or CommandResult(
+            stdout="Stopped IPC tracing. Dumping logs to: /data/local/tmp/ipc.txt\n",
+            stderr="",
+            exit_code=0,
+            duration_ms=60.0,
+        )
         # `adb shell dumpsys gfxinfo <package> framestats` — the per-process
         # summary block get_frame_stats parses (totals, jank, percentiles, the
         # "Number <x>:" counters, HISTOGRAM). Transcribed/trimmed from live
@@ -1789,6 +1814,14 @@ class FakeBackend:
             return self._set_debug_app_result
         if command == "am clear-debug-app":
             return self._clear_debug_app_result
+        if command.startswith("am profile start "):
+            return self._am_profile_start_result
+        if command.startswith("am profile stop "):
+            return self._am_profile_stop_result
+        if command == "am trace-ipc start":
+            return self._trace_ipc_start_result
+        if command.startswith("am trace-ipc stop"):
+            return self._trace_ipc_stop_result
         if command.startswith("dumpsys gfxinfo ") and command.endswith(" reset"):
             return self._gfxinfo_reset_result
         if command.startswith("dumpsys gfxinfo "):

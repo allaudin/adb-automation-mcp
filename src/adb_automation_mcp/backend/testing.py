@@ -89,6 +89,9 @@ class FakeBackend:
         user_info_result: CommandResult | None = None,
         list_users_result: CommandResult | None = None,
         switch_user_result: CommandResult | None = None,
+        start_user_result: CommandResult | None = None,
+        is_user_stopped_result: CommandResult | None = None,
+        user_state_result: CommandResult | None = None,
         create_user_result: CommandResult | None = None,
         remove_user_result: CommandResult | None = None,
         supports_multiple_users_result: CommandResult | None = None,
@@ -128,6 +131,8 @@ class FakeBackend:
         ps_result: CommandResult | None = None,
         pidof_names_result: CommandResult | None = None,
         dumpsys_meminfo_result: CommandResult | None = None,
+        content_query_result: CommandResult | None = None,
+        instrument_result: CommandResult | None = None,
         pull_result: CommandResult | None = None,
         forward_result: CommandResult | None = None,
         forward_list_result: CommandResult | None = None,
@@ -271,6 +276,26 @@ class FakeBackend:
         # Real `adb shell am switch-user N` success output: empty stdout, exit 0.
         self._switch_user_result = switch_user_result or CommandResult(
             stdout="", stderr="", exit_code=0, duration_ms=100.0
+        )
+        # `adb shell am start-user [-w] [--display N] USER` — captured live from a
+        # car AVD: "Success: user started" on stdout, exit 0. A failure prints
+        # "Error: could not start user" and STILL exits 0, so outcome is read
+        # from the text, not the exit code — override to simulate that.
+        self._start_user_result = start_user_result or CommandResult(
+            stdout="Success: user started\n", stderr="", exit_code=0, duration_ms=250.0
+        )
+        # `adb shell am is-user-stopped USER` — bare "true"/"false" on stdout,
+        # exit 0. Captured live: an unknown user id returns "true" (i.e.
+        # "stopped"), not an error.
+        self._is_user_stopped_result = is_user_stopped_result or CommandResult(
+            stdout="false\n", stderr="", exit_code=0, duration_ms=30.0
+        )
+        # `adb shell am get-started-user-state USER` — the lifecycle token on
+        # stdout ("RUNNING_UNLOCKED", "RUNNING_LOCKED", "BOOTING", "STOPPING",
+        # ...), exit 0. Captured live; a not-started user prints
+        # "User is not started: <id>" (also exit 0).
+        self._user_state_result = user_state_result or CommandResult(
+            stdout="RUNNING_UNLOCKED\n", stderr="", exit_code=0, duration_ms=30.0
         )
         # Real `adb shell pm create-user NAME` success output, captured from an actual run.
         self._create_user_result = create_user_result or CommandResult(
@@ -730,6 +755,68 @@ class FakeBackend:
         # transcribed from live car-AVD output for com.android.systemui. A
         # target with no running process prints "No process found for: <target>"
         # and still exits 0 — see get_process_memory for how that's classified.
+        # `adb shell content query --uri URI [...]` — one "Row: N col=val, col=val"
+        # line per row (captured live from content://settings/system on a car
+        # AVD). An empty result set prints "No result found." and exits 0; a bad
+        # authority prints "Error while accessing provider:<a>" + a Java stack
+        # trace and STILL exits 0 — override to simulate those.
+        self._content_query_result = content_query_result or CommandResult(
+            stdout=(
+                "Row: 0 _id=19, name=notification_light_pulse, value=1\n"
+                "Row: 1 _id=4, name=volume_alarm, value=6\n"
+                "Row: 2 _id=0, name=volume_music, value=5\n"
+                "Row: 3 _id=38, name=ringtone, "
+                "value=content://media/internal/audio/media/139?title=Girtab&canonical=1\n"
+                "Row: 4 _id=40, name=unset_key, value=NULL\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=120.0,
+        )
+        # `adb shell am instrument -w -r [...] COMPONENT` — the raw
+        # INSTRUMENTATION_STATUS / INSTRUMENTATION_STATUS_CODE / _RESULT / _CODE
+        # marker stream. Default fixture: a two-test all-pass run shaped on the
+        # documented AndroidJUnitRunner raw output (no instrumentation package
+        # was installed on the car AVD to capture from). A component that can't
+        # be started prints "INSTRUMENTATION_FAILED: <component>" + a stack
+        # trace and exits 0 — override to simulate that.
+        self._instrument_result = instrument_result or CommandResult(
+            stdout=(
+                "INSTRUMENTATION_STATUS: class=com.example.FooTest\n"
+                "INSTRUMENTATION_STATUS: current=1\n"
+                "INSTRUMENTATION_STATUS: id=AndroidJUnitRunner\n"
+                "INSTRUMENTATION_STATUS: numtests=2\n"
+                "INSTRUMENTATION_STATUS: stream=\n"
+                "INSTRUMENTATION_STATUS: test=testAlpha\n"
+                "INSTRUMENTATION_STATUS_CODE: 1\n"
+                "INSTRUMENTATION_STATUS: class=com.example.FooTest\n"
+                "INSTRUMENTATION_STATUS: current=1\n"
+                "INSTRUMENTATION_STATUS: numtests=2\n"
+                "INSTRUMENTATION_STATUS: stream=.\n"
+                "INSTRUMENTATION_STATUS: test=testAlpha\n"
+                "INSTRUMENTATION_STATUS_CODE: 0\n"
+                "INSTRUMENTATION_STATUS: class=com.example.FooTest\n"
+                "INSTRUMENTATION_STATUS: current=2\n"
+                "INSTRUMENTATION_STATUS: numtests=2\n"
+                "INSTRUMENTATION_STATUS: test=testBeta\n"
+                "INSTRUMENTATION_STATUS_CODE: 1\n"
+                "INSTRUMENTATION_STATUS: current=2\n"
+                "INSTRUMENTATION_STATUS: numtests=2\n"
+                "INSTRUMENTATION_STATUS: stream=..\n"
+                "INSTRUMENTATION_STATUS: test=testBeta\n"
+                "INSTRUMENTATION_STATUS_CODE: 0\n"
+                "INSTRUMENTATION_RESULT: stream=\n"
+                "\n"
+                "Time: 1.234\n"
+                "\n"
+                "OK (2 tests)\n"
+                "\n"
+                "INSTRUMENTATION_CODE: -1\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=1800.0,
+        )
         self._dumpsys_meminfo_result = dumpsys_meminfo_result or CommandResult(
             stdout=(
                 "Applications Memory Usage (in Kilobytes):\n"
@@ -1152,6 +1239,16 @@ class FakeBackend:
             return self._list_users_result
         if command.startswith("am switch-user "):
             return self._switch_user_result
+        if command.startswith("am start-user "):
+            return self._start_user_result
+        if command.startswith("am is-user-stopped "):
+            return self._is_user_stopped_result
+        if command.startswith("am get-started-user-state "):
+            return self._user_state_result
+        if command.startswith("am instrument "):
+            return self._instrument_result
+        if command.startswith("content query "):
+            return self._content_query_result
         if command.startswith("pm create-user "):
             return self._create_user_result
         if command.startswith("pm remove-user "):

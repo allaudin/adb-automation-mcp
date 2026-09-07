@@ -12,6 +12,7 @@ from adb_automation_mcp.errors import (
     AdbUnavailableError,
     BackendError,
     DeviceNotFoundError,
+    InvalidArgumentError,
     UserNotFoundError,
 )
 from adb_automation_mcp.modules.user.service import (
@@ -679,3 +680,202 @@ def test_user_capabilities_summary_mentions_lack_of_support() -> None:
         visible_background_users_on_default_display_supported=None,
     ).summary()
     assert "does not support multiple users" in summary
+
+
+# --- start_user / is_user_stopped / get_user_state -----------------------
+
+
+class _RecordingBackend(FakeBackend):
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+        self.command: str | None = None
+
+    async def shell(
+        self, serial: str, command: str, timeout_s: float | None = None
+    ) -> CommandResult:
+        self.command = command
+        return await super().shell(serial, command, timeout_s)
+
+
+def _cr(stdout: str = "", stderr: str = "", exit_code: int = 0) -> CommandResult:
+    return CommandResult(stdout=stdout, stderr=stderr, exit_code=exit_code, duration_ms=20.0)
+
+
+@pytest.mark.asyncio
+async def test_start_user__default_command_and_success() -> None:
+    backend = _RecordingBackend()
+
+    result = await UserService(backend).start_user("emulator-5554", 10)
+
+    assert backend.command == "am start-user 10"
+    assert result.user_id == 10
+    assert result.wait is False
+    assert result.display_id is None
+    assert result.started is True
+    assert "Success" in result.output
+
+
+@pytest.mark.asyncio
+async def test_start_user__wait_and_display_flags() -> None:
+    backend = _RecordingBackend()
+
+    result = await UserService(backend).start_user(
+        "emulator-5554", 10, wait=True, display_id=2
+    )
+
+    assert backend.command == "am start-user -w --display 2 10"
+    assert result.wait is True
+    assert result.display_id == 2
+
+
+@pytest.mark.asyncio
+async def test_start_user__negative_user_id_rejected_before_backend() -> None:
+    class ExplodingBackend(FakeBackend):
+        async def shell(
+            self, serial: str, command: str, timeout_s: float | None = None
+        ) -> CommandResult:
+            raise AssertionError("backend should not be reached")
+
+    with pytest.raises(InvalidArgumentError):
+        await UserService(ExplodingBackend()).start_user("emulator-5554", -1)
+
+
+@pytest.mark.asyncio
+async def test_start_user__negative_display_id_rejected_before_backend() -> None:
+    class ExplodingBackend(FakeBackend):
+        async def shell(
+            self, serial: str, command: str, timeout_s: float | None = None
+        ) -> CommandResult:
+            raise AssertionError("backend should not be reached")
+
+    with pytest.raises(InvalidArgumentError):
+        await UserService(ExplodingBackend()).start_user("emulator-5554", 10, display_id=-3)
+
+
+@pytest.mark.asyncio
+async def test_start_user__error_message_with_exit_zero_raises_backend_error() -> None:
+    # `am start-user` prints "Error: could not start user" but still exits 0.
+    backend = FakeBackend(start_user_result=_cr(stdout="Error: could not start user\n"))
+
+    with pytest.raises(BackendError):
+        await UserService(backend).start_user("emulator-5554", 999)
+
+
+@pytest.mark.asyncio
+async def test_start_user__unknown_serial_raises_device_not_found() -> None:
+    backend = FakeBackend(
+        start_user_result=_cr(stderr="adb: device 'bogus' not found\n", exit_code=1)
+    )
+
+    with pytest.raises(DeviceNotFoundError):
+        await UserService(backend).start_user("bogus", 10)
+
+
+@pytest.mark.asyncio
+async def test_start_user__backend_unavailable_raises_adb_unavailable() -> None:
+    with pytest.raises(AdbUnavailableError):
+        await UserService(FakeBackend(unavailable=True)).start_user("emulator-5554", 10)
+
+
+@pytest.mark.asyncio
+async def test_is_user_stopped__true_and_false() -> None:
+    backend = _RecordingBackend()
+    result = await UserService(backend).is_user_stopped("emulator-5554", 10)
+    assert backend.command == "am is-user-stopped 10"
+    assert result.stopped is False
+
+    true_backend = FakeBackend(is_user_stopped_result=_cr(stdout="true\n"))
+    result = await UserService(true_backend).is_user_stopped("emulator-5554", 999)
+    assert result.stopped is True
+
+
+@pytest.mark.asyncio
+async def test_is_user_stopped__negative_user_id_rejected_before_backend() -> None:
+    class ExplodingBackend(FakeBackend):
+        async def shell(
+            self, serial: str, command: str, timeout_s: float | None = None
+        ) -> CommandResult:
+            raise AssertionError("backend should not be reached")
+
+    with pytest.raises(InvalidArgumentError):
+        await UserService(ExplodingBackend()).is_user_stopped("emulator-5554", -1)
+
+
+@pytest.mark.asyncio
+async def test_is_user_stopped__malformed_output_raises_backend_error() -> None:
+    backend = FakeBackend(is_user_stopped_result=_cr(stdout="huh?\n"))
+
+    with pytest.raises(BackendError):
+        await UserService(backend).is_user_stopped("emulator-5554", 10)
+
+
+@pytest.mark.asyncio
+async def test_is_user_stopped__unknown_serial_raises_device_not_found() -> None:
+    backend = FakeBackend(
+        is_user_stopped_result=_cr(stderr="adb: device 'bogus' not found\n", exit_code=1)
+    )
+
+    with pytest.raises(DeviceNotFoundError):
+        await UserService(backend).is_user_stopped("bogus", 10)
+
+
+@pytest.mark.asyncio
+async def test_get_user_state__running_unlocked() -> None:
+    backend = _RecordingBackend()
+
+    result = await UserService(backend).get_user_state("emulator-5554", 10)
+
+    assert backend.command == "am get-started-user-state 10"
+    assert result.started is True
+    assert result.state == "RUNNING_UNLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_get_user_state__trailing_detail_is_trimmed_to_token() -> None:
+    backend = FakeBackend(
+        user_state_result=_cr(stdout="RUNNING_UNLOCKED (mUnlocked=true)\n")
+    )
+
+    result = await UserService(backend).get_user_state("emulator-5554", 10)
+
+    assert result.state == "RUNNING_UNLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_get_user_state__not_started_is_valid_result() -> None:
+    backend = FakeBackend(user_state_result=_cr(stdout="User is not started: 11\n"))
+
+    result = await UserService(backend).get_user_state("emulator-5554", 11)
+
+    assert result.started is False
+    assert result.state is None
+
+
+@pytest.mark.asyncio
+async def test_get_user_state__empty_output_raises_backend_error() -> None:
+    backend = FakeBackend(user_state_result=_cr(stdout="\n"))
+
+    with pytest.raises(BackendError):
+        await UserService(backend).get_user_state("emulator-5554", 10)
+
+
+@pytest.mark.asyncio
+async def test_get_user_state__negative_user_id_rejected_before_backend() -> None:
+    class ExplodingBackend(FakeBackend):
+        async def shell(
+            self, serial: str, command: str, timeout_s: float | None = None
+        ) -> CommandResult:
+            raise AssertionError("backend should not be reached")
+
+    with pytest.raises(InvalidArgumentError):
+        await UserService(ExplodingBackend()).get_user_state("emulator-5554", -5)
+
+
+@pytest.mark.asyncio
+async def test_get_user_state__unknown_serial_raises_device_not_found() -> None:
+    backend = FakeBackend(
+        user_state_result=_cr(stderr="adb: device 'bogus' not found\n", exit_code=1)
+    )
+
+    with pytest.raises(DeviceNotFoundError):
+        await UserService(backend).get_user_state("bogus", 10)

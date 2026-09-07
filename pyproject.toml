@@ -68,6 +68,8 @@ network = "adb_automation_mcp.modules.network.manifest:MODULE"
 date_time = "adb_automation_mcp.modules.date_time.manifest:MODULE"
 input = "adb_automation_mcp.modules.input.manifest:MODULE"
 ui = "adb_automation_mcp.modules.ui.manifest:MODULE"
+content = "adb_automation_mcp.modules.content.manifest:MODULE"
+instrumentation = "adb_automation_mcp.modules.instrumentation.manifest:MODULE"
 
 [dependency-groups]
 dev = [

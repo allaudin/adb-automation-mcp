@@ -11,8 +11,11 @@ from adb_automation_mcp.modules.user.tools import (
     dump_user,
     get_current_user,
     get_user_capabilities,
+    get_user_state,
+    is_user_stopped,
     list_users,
     remove_user,
+    start_user,
     switch_user,
     user_info,
 )
@@ -30,6 +33,9 @@ MODULE = ModuleManifest(
         create_user,
         remove_user,
         get_user_capabilities,
+        start_user,
+        is_user_stopped,
+        get_user_state,
     ],
     resources=[],
 )

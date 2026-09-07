@@ -14,12 +14,15 @@ from adb_automation_mcp.modules.user.service import (
     CreateUserResult,
     CurrentUser,
     RemoveUserResult,
+    StartUserResult,
     SwitchUserResult,
     UserCapabilities,
     UserDump,
     UserInfo,
     UserList,
+    UserRunState,
     UserService,
+    UserStoppedState,
 )
 from adb_automation_mcp.registry import category
 
@@ -397,3 +400,157 @@ async def get_user_capabilities(ctx: Context, serial: str) -> UserCapabilities:
     services = cast("dict[str, object]", ctx.lifespan_context["services"])
     user = cast(UserService, services["user"])
     return await user.get_user_capabilities(serial)
+
+
+@category("write")
+async def start_user(
+    ctx: Context,
+    serial: str,
+    user_id: int,
+    wait: bool = False,
+    display_id: int | None = None,
+) -> StartUserResult:
+    """Start a stopped Android user in the background: `adb shell am start-user`.
+
+    Brings a stopped secondary user (a work profile, guest, or Automotive
+    passenger user) to the RUNNING state without switching the foreground to
+    it — use switch_user for a foreground switch. Starting an
+    already-running user is a harmless success. To bring one to the
+    foreground on a specific screen, pass display_id (only meaningful on
+    builds that support visible background users, typically automotive).
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+        user_id: The Android user id to start (see list_users).
+        wait: When true, pass `-w` so the call blocks until the user is
+            fully started and unlocked before returning.
+        display_id: Make the user visible on this logical display so it can
+            launch activities there (`--display`). Omit for a plain
+            background start. Unsupported on most non-automotive builds.
+
+    Returns:
+        The serial, user_id, the wait and display_id that were requested,
+        started (always true when this returns without error), and the raw
+        `am` message ("Success: user started").
+
+    Error handling:
+        A negative user_id or display_id raises INVALID_ARGUMENT before
+        anything runs. An unknown serial or unresponsive adb binary raises
+        DEVICE_NOT_FOUND/ADB_UNAVAILABLE. `am start-user` exits 0 even when
+        it fails, so a non-"Success" message ("Error: could not start user",
+        or a build rejecting `--display`) raises BACKEND_ERROR carrying that
+        message.
+
+    Example:
+        Called with serial="emulator-5554", user_id=10, wait=true. A typical
+        response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "Started user 10 on emulator-5554.",
+          "data": {
+            "serial": "emulator-5554",
+            "user_id": 10,
+            "wait": true,
+            "display_id": null,
+            "started": true,
+            "output": "Success: user started"
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    user = cast(UserService, services["user"])
+    return await user.start_user(serial, user_id, wait=wait, display_id=display_id)
+
+
+@category("read")
+async def is_user_stopped(ctx: Context, serial: str, user_id: int) -> UserStoppedState:
+    """Check whether an Android user is stopped: `adb shell am is-user-stopped`.
+
+    A quick boolean gate before user-scoped automation — if a user is
+    stopped, start_user it first. This does not distinguish "stopped" from
+    "no such user"; both report stopped=true.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+        user_id: The Android user id to check (see list_users).
+
+    Returns:
+        The serial, user_id, and stopped (true when the user is in the
+        stopped state or does not exist).
+
+    Error handling:
+        A negative user_id raises INVALID_ARGUMENT before anything runs. An
+        unknown serial or unresponsive adb binary raises
+        DEVICE_NOT_FOUND/ADB_UNAVAILABLE. Output that is neither "true" nor
+        "false" raises BACKEND_ERROR.
+
+    Example:
+        Called with serial="emulator-5554", user_id=10. A typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "User 10 on emulator-5554 is not stopped.",
+          "data": {
+            "serial": "emulator-5554",
+            "user_id": 10,
+            "stopped": false
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    user = cast(UserService, services["user"])
+    return await user.is_user_stopped(serial, user_id)
+
+
+@category("read")
+async def get_user_state(ctx: Context, serial: str, user_id: int) -> UserRunState:
+    """Get a started user's lifecycle state: `adb shell am get-started-user-state`.
+
+    Reports where a started user is in the ActivityManager lifecycle
+    (BOOTING → RUNNING_LOCKED → RUNNING_UNLOCKING → RUNNING_UNLOCKED →
+    STOPPING → SHUTDOWN) — useful for waiting until a user reaches
+    RUNNING_UNLOCKED before launching activities under it. A user that isn't
+    currently started reports started=false, not an error.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+        user_id: The Android user id to inspect (see list_users).
+
+    Returns:
+        The serial, user_id, started (false when the user isn't running),
+        and state — the raw lifecycle token when started, otherwise null.
+
+    Error handling:
+        A negative user_id raises INVALID_ARGUMENT before anything runs. An
+        unknown serial or unresponsive adb binary raises
+        DEVICE_NOT_FOUND/ADB_UNAVAILABLE. Empty output raises BACKEND_ERROR;
+        the "User is not started" message is a normal started=false result,
+        not a failure.
+
+    Example:
+        Called with serial="emulator-5554", user_id=10. A typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "User 10 on emulator-5554: RUNNING_UNLOCKED.",
+          "data": {
+            "serial": "emulator-5554",
+            "user_id": 10,
+            "started": true,
+            "state": "RUNNING_UNLOCKED"
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    user = cast(UserService, services["user"])
+    return await user.get_user_state(serial, user_id)

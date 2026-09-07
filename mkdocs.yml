@@ -40,9 +40,11 @@ nav:
       - app_data: reference/app_data.md
       - android_services: reference/android_services.md
       - broadcasts: reference/broadcasts.md
+      - content: reference/content.md
       - date_time: reference/date_time.md
       - displays: reference/displays.md
       - files: reference/files.md
+      - instrumentation: reference/instrumentation.md
       - network: reference/network.md
       - permissions: reference/permissions.md
       - power: reference/power.md

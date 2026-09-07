@@ -170,10 +170,12 @@ def test_adb_version_info_summary_prefers_platform_tools_then_bridge() -> None:
 
 # --- generate_bugreport ------------------------------------------------
 
+_ONLINE = [DeviceInfo(serial="emulator-5554", state="device")]
+
 
 @pytest.mark.asyncio
 async def test_generate_bugreport__zip_success(tmp_path: Path) -> None:
-    service = DiagnosticsService(FakeBackend(), local_root=tmp_path)
+    service = DiagnosticsService(FakeBackend(devices=_ONLINE), local_root=tmp_path)
 
     result = await service.generate_bugreport("emulator-5554", "device.zip")
 
@@ -185,12 +187,31 @@ async def test_generate_bugreport__zip_success(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_generate_bugreport__no_extension_gets_zip(tmp_path: Path) -> None:
-    service = DiagnosticsService(FakeBackend(), local_root=tmp_path)
+    service = DiagnosticsService(FakeBackend(devices=_ONLINE), local_root=tmp_path)
 
     result = await service.generate_bugreport("emulator-5554", "device")
 
     assert result.local_path == str(tmp_path / "bugreports" / "device.zip")
     assert result.is_zip is True
+
+
+@pytest.mark.asyncio
+async def test_generate_bugreport__unknown_serial_fails_fast(tmp_path: Path) -> None:
+    # no wait-for-device block: the preflight rejects it before backend.bugreport
+    backend = FakeBackend(devices=[DeviceInfo(serial="emulator-5556", state="device")])
+    with pytest.raises(DeviceNotFoundError):
+        await DiagnosticsService(backend, local_root=tmp_path).generate_bugreport(
+            "emulator-5554", "device.zip"
+        )
+
+
+@pytest.mark.asyncio
+async def test_generate_bugreport__offline_serial_fails_fast(tmp_path: Path) -> None:
+    backend = FakeBackend(devices=[DeviceInfo(serial="emulator-5554", state="offline")])
+    with pytest.raises(DeviceNotFoundError):
+        await DiagnosticsService(backend, local_root=tmp_path).generate_bugreport(
+            "emulator-5554", "device.zip"
+        )
 
 
 @pytest.mark.asyncio
@@ -230,9 +251,10 @@ async def test_generate_bugreport__adb_failure_disconnect_raises_device_not_foun
     tmp_path: Path,
 ) -> None:
     backend = FakeBackend(
+        devices=_ONLINE,
         bugreport_result=CommandResult(
             stdout="", stderr="error: no devices/emulators found\n", exit_code=1, duration_ms=10.0
-        )
+        ),
     )
     with pytest.raises(DeviceNotFoundError):
         await DiagnosticsService(backend, local_root=tmp_path).generate_bugreport(
@@ -243,9 +265,10 @@ async def test_generate_bugreport__adb_failure_disconnect_raises_device_not_foun
 @pytest.mark.asyncio
 async def test_generate_bugreport__adb_failure_other_raises_backend_error(tmp_path: Path) -> None:
     backend = FakeBackend(
+        devices=_ONLINE,
         bugreport_result=CommandResult(
             stdout="", stderr="something broke\n", exit_code=1, duration_ms=10.0
-        )
+        ),
     )
     with pytest.raises(BackendError):
         await DiagnosticsService(backend, local_root=tmp_path).generate_bugreport(

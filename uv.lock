@@ -13,7 +13,7 @@ resolution-markers = [
 
 [[package]]
 name = "adb-automation-mcp"
-version = "0.2.0"
+version = "1.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },

@@ -97,7 +97,7 @@ from the table above is optional; shown here with example values:
 
 ## Available tools
 
-**87 tools.** See the [Tool Reference](reference/diagnostics.md) for every tool's full
+**92 tools.** See the [Tool Reference](reference/diagnostics.md) for every tool's full
 signature, docstring, and worked example — generated directly from source, so it can't
 drift out of sync with what the server actually exposes. The
 [README](https://github.com/allaudin/adb-automation-mcp#tools) has the full per-module

@@ -84,7 +84,7 @@ uv run mkdocs build --strict   # docs site
 
 ## Tools
 
-**87 tools.** Full signatures, docstrings, and worked examples are in the
+**92 tools.** Full signatures, docstrings, and worked examples are in the
 [tool reference](https://allaudin.github.io/adb-automation-mcp/reference/diagnostics/).
 Tools marked † are `destructive` — not registered unless
 `ADB_AUTOMATION_ALLOW_DESTRUCTIVE=1`.
@@ -107,6 +107,7 @@ Tools marked † are `destructive` — not registered unless
 | `input` (4) | `tap`, `swipe`, `input_text`, `press_key` |
 | `instrumentation` (1) | `run_instrumentation` |
 | `logger` (6) | `read_logs`, `clear_logs`, `get_log_buffer_size`, `read_package_logs`, `start_log_session`, `stop_log_session` |
+| `memory` (5) | `get_app_memory_summary`, `get_app_memory_details`, `get_system_memory_summary`, `get_memory_history`, `capture_heap_dump` |
 | `network` (3) | `list_network_interfaces`, `get_routes`, `get_connectivity_state` |
 | `packages` (7) | `list_packages`, `install_apk`, `uninstall_package`†, `install_existing_for_user`, `get_package_path`, `get_package_info`, `set_package_enabled_state` |
 | `permissions` (3) | `grant_permission`, `revoke_permission`, `get_package_permissions` |

@@ -131,6 +131,10 @@ class FakeBackend:
         ps_result: CommandResult | None = None,
         pidof_names_result: CommandResult | None = None,
         dumpsys_meminfo_result: CommandResult | None = None,
+        dumpsys_meminfo_detail_result: CommandResult | None = None,
+        dumpsys_meminfo_system_result: CommandResult | None = None,
+        procstats_result: CommandResult | None = None,
+        am_dumpheap_result: CommandResult | None = None,
         content_query_result: CommandResult | None = None,
         instrument_result: CommandResult | None = None,
         dropbox_print_result: CommandResult | None = None,
@@ -929,6 +933,128 @@ class FakeBackend:
             exit_code=0,
             duration_ms=210.0,
         )
+        # `adb shell dumpsys meminfo -a <target>` — the App Summary block plus
+        # the per-mapping table (Native Heap … Unknown … TOTAL), the "Objects"
+        # section, and the "SQL" section, trimmed but transcribed from live
+        # car-AVD output for com.android.systemui.
+        self._dumpsys_meminfo_detail_result = dumpsys_meminfo_detail_result or CommandResult(
+            stdout=(
+                "Applications Memory Usage (in Kilobytes):\n"
+                "Uptime: 8111658 Realtime: 8111658\n"
+                "\n"
+                "** MEMINFO in pid 1224 [com.android.systemui] **\n"
+                "                   Pss      Pss   Shared  Private   Shared  Private     Swap"
+                "      Rss     Heap     Heap     Heap\n"
+                "                 Total    Clean    Dirty    Dirty    Clean    Clean    Dirty"
+                "    Total     Size    Alloc     Free\n"
+                "                ------   ------   ------   ------   ------   ------   ------"
+                "   ------   ------   ------   ------\n"
+                "  Native Heap    21824        0     3792    21748        0        0        0"
+                "    25540    37504    25915     7772\n"
+                "  Dalvik Heap    15764        0     7940    15576        0        0        0"
+                "    23516    20642    15482     5160\n"
+                "        Stack     1656        0        8     1656        0        0        0"
+                "     1664\n"
+                "     .so mmap     6325     5363     5472      920    52184      348        0"
+                "    58924\n"
+                "      Unknown     1111        0     1400     1096        0        0        0"
+                "     2496\n"
+                "        TOTAL   104328    48869    45012    53592   129112    37232        8"
+                "   264948    58146    41397    12932\n"
+                "\n"
+                " App Summary\n"
+                "                       Pss(KB)                        Rss(KB)\n"
+                "                        ------                         ------\n"
+                "           Java Heap:    25324                          57072\n"
+                "         Native Heap:    21748                          25540\n"
+                "                Code:    37816                         170368\n"
+                "               Stack:     1656                           1664\n"
+                "            Graphics:        0                              0\n"
+                "       Private Other:     4280\n"
+                "              System:    13504\n"
+                "             Unknown:                                   10304\n"
+                "\n"
+                "           TOTAL PSS:   104328            TOTAL RSS:   264948"
+                "      TOTAL SWAP (KB):        8\n"
+                "\n"
+                " Objects\n"
+                "               Views:      855         ViewRootImpl:        6\n"
+                "         AppContexts:       55           Activities:        0\n"
+                "       Local Binders:      374        Proxy Binders:      186\n"
+                "       Parcel memory:       41         Parcel count:      135\n"
+                "    Death Recipients:       14             WebViews:        0\n"
+                "\n"
+                " SQL\n"
+                "         MEMORY_USED:        0\n"
+                "  PAGECACHE_OVERFLOW:        0          MALLOC_SIZE:        0\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=260.0,
+        )
+        # `adb shell dumpsys meminfo` (no target) — the RAM totals block plus
+        # the "Total PSS by process" list, trimmed from live car-AVD output.
+        self._dumpsys_meminfo_system_result = dumpsys_meminfo_system_result or CommandResult(
+            stdout=(
+                "Applications Memory Usage (in Kilobytes):\n"
+                "Uptime: 8141530 Realtime: 8141530\n"
+                "\n"
+                "Total RSS by process:\n"
+                "    464,304K: system (pid 729)\n"
+                "    263,796K: com.android.systemui (pid 1224)\n"
+                "Total PSS by process:\n"
+                "    266,973K: system (pid 729)\n"
+                "    103,176K: com.android.systemui (pid 1224)\n"
+                "     49,191K: com.android.car.carlauncher (pid 1568 / activities) (user 10)\n"
+                "     34,095K: zygote64 (pid 432)\n"
+                "\n"
+                "Total RAM: 4,007,632K (status normal)\n"
+                " Free RAM: 2,516,255K (  120,755K cached pss + 1,129,572K cached kernel"
+                " + 1,265,928K free)\n"
+                " Used RAM: 1,406,266K (1,099,142K used pss +   307,124K kernel)\n"
+                " Lost RAM:    95,527K\n"
+                "     ZRAM:    15,404K physical used for    19,880K in swap"
+                " (3,005,720K total swap)\n"
+                "   Tuning: 192 (large 576), oom   322,560K, restore limit   107,520K\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=300.0,
+        )
+        # `adb shell dumpsys procstats --hours <h> <package>` — trimmed to the
+        # "Process summary" bands get_memory_history parses. Field shape
+        # (`<state>: <pct>% (minPss-avgPss-maxPss/minUss-avgUss-maxUss/minRss-
+        # avgRss-maxRss over N)`) transcribed from live car-AVD output.
+        self._procstats_result = procstats_result or CommandResult(
+            stdout=(
+                "AGGREGATED OVER LAST 3 HOURS:\n"
+                "          Start time: 2026-09-07 07:48:12\n"
+                "        Total uptime: +2h15m8s47ms\n"
+                "\n"
+                "Process summary:\n"
+                "  * com.android.systemui / u0a141 / v37:\n"
+                "         TOTAL: 100% (0.00-62MB-103MB/0.00-54MB-90MB/262MB-258MB-262MB over 8)\n"
+                "    Persistent: 100% (0.00-62MB-103MB/0.00-54MB-90MB/262MB-258MB-262MB over 8)\n"
+                "\n"
+                "Run time Stats:\n"
+                "   SOn/Norm: +2h15m21s518ms\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=180.0,
+        )
+        # `adb shell am dumpheap [opts] <process> <file>` — captured live from a
+        # car AVD: "File: <path>" then "Waiting for dump to finish...", exit 0;
+        # the command blocks until the .hprof is written. A process that isn't
+        # running prints "Exception occurred while executing 'dumpheap':
+        # java.lang.IllegalArgumentException: Unknown process: <name>", exit 255
+        # (still leaving a 0-byte file). Override to simulate that.
+        self._am_dumpheap_result = am_dumpheap_result or CommandResult(
+            stdout="File: /data/local/tmp/x.hprof\nWaiting for dump to finish...\n",
+            stderr="",
+            exit_code=0,
+            duration_ms=1500.0,
+        )
         # None (the default) means "build a realistic success message from
         # whatever remote_path is actually pulled" — see pull() below, same
         # convention as connect_result. Real, long-stable `adb pull` wording.
@@ -1475,8 +1601,16 @@ class FakeBackend:
             return self._wm_size_result
         if command.startswith("wm density"):
             return self._wm_density_result
+        if command == "dumpsys meminfo":
+            return self._dumpsys_meminfo_system_result
+        if command.startswith("dumpsys meminfo -a "):
+            return self._dumpsys_meminfo_detail_result
         if command.startswith("dumpsys meminfo "):
             return self._dumpsys_meminfo_result
+        if command.startswith("dumpsys procstats "):
+            return self._procstats_result
+        if command.startswith("am dumpheap "):
+            return self._am_dumpheap_result
         if command.startswith("dumpsys dropbox --print system_app_anr"):
             return self._dropbox_system_anr_result
         if command.startswith("dumpsys dropbox"):

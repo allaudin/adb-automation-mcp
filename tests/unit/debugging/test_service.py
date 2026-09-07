@@ -142,3 +142,108 @@ async def test_get_process_exit_history__backend_unavailable() -> None:
         await DebuggingService(FakeBackend(unavailable=True)).get_process_exit_history(
             "emulator-5554", "com.x"
         )
+
+
+# --- set_debug_app / clear_debug_app / list_jdwp_processes ------------
+
+
+@pytest.mark.asyncio
+async def test_set_debug_app__default_command() -> None:
+    backend = RecordingBackend()
+
+    result = await DebuggingService(backend).set_debug_app("emulator-5554", "com.example.app")
+
+    assert backend.command == "am set-debug-app com.example.app"
+    assert result.wait_for_debugger is False
+    assert result.persistent is False
+
+
+@pytest.mark.asyncio
+async def test_set_debug_app__wait_and_persistent_flags() -> None:
+    backend = RecordingBackend()
+
+    result = await DebuggingService(backend).set_debug_app(
+        "emulator-5554", "com.example.app", wait_for_debugger=True, persistent=True
+    )
+
+    assert backend.command == "am set-debug-app -w --persistent com.example.app"
+    assert result.wait_for_debugger is True
+    assert result.persistent is True
+
+
+@pytest.mark.asyncio
+async def test_set_debug_app__unknown_package_is_not_an_error() -> None:
+    result = await DebuggingService(FakeBackend()).set_debug_app("emulator-5554", "com.nope.nope")
+    assert result.package == "com.nope.nope"
+
+
+@pytest.mark.asyncio
+async def test_set_debug_app__blank_package_rejected_before_backend() -> None:
+    class Exploding(FakeBackend):
+        async def shell(self, serial: str, command: str, timeout_s: float | None = None) -> CommandResult:
+            raise AssertionError("backend should not be reached")
+
+    with pytest.raises(InvalidArgumentError):
+        await DebuggingService(Exploding()).set_debug_app("emulator-5554", "  ")
+
+
+@pytest.mark.asyncio
+async def test_set_debug_app__permission_denied() -> None:
+    backend = FakeBackend(set_debug_app_result=_cr(stderr="Permission Denial\n", exit_code=1))
+    with pytest.raises(PermissionDeniedError):
+        await DebuggingService(backend).set_debug_app("emulator-5554", "com.x")
+
+
+@pytest.mark.asyncio
+async def test_clear_debug_app__command_and_idempotent() -> None:
+    backend = RecordingBackend()
+
+    result = await DebuggingService(backend).clear_debug_app("emulator-5554")
+
+    assert backend.command == "am clear-debug-app"
+    assert result.cleared is True
+
+
+@pytest.mark.asyncio
+async def test_clear_debug_app__unclassified_backend_error() -> None:
+    backend = FakeBackend(clear_debug_app_result=_cr(stderr="broken\n", exit_code=2))
+    with pytest.raises(BackendError):
+        await DebuggingService(backend).clear_debug_app("emulator-5554")
+
+
+@pytest.mark.asyncio
+async def test_list_jdwp_processes__parses_pids() -> None:
+    result = await DebuggingService(FakeBackend()).list_jdwp_processes("emulator-5554")
+
+    assert result.count == 3
+    assert result.pids == [1224, 1568, 2411]
+
+
+@pytest.mark.asyncio
+async def test_list_jdwp_processes__none() -> None:
+    backend = FakeBackend(jdwp_result=_cr(stdout=""))
+    result = await DebuggingService(backend).list_jdwp_processes("emulator-5554")
+    assert result.count == 0
+    assert result.pids == []
+
+
+@pytest.mark.asyncio
+async def test_list_jdwp_processes__invalid_lines_ignored_and_deduped() -> None:
+    backend = FakeBackend(jdwp_result=_cr(stdout="1224\nnot-a-pid\n1224\n1568\n"))
+    result = await DebuggingService(backend).list_jdwp_processes("emulator-5554")
+    assert result.pids == [1224, 1568]
+
+
+@pytest.mark.asyncio
+async def test_list_jdwp_processes__device_offline_raises_device_not_found() -> None:
+    backend = FakeBackend(
+        jdwp_result=_cr(stderr="error: device offline\n", exit_code=1)
+    )
+    with pytest.raises(DeviceNotFoundError):
+        await DebuggingService(backend).list_jdwp_processes("emulator-5554")
+
+
+@pytest.mark.asyncio
+async def test_list_jdwp_processes__backend_unavailable() -> None:
+    with pytest.raises(AdbUnavailableError):
+        await DebuggingService(FakeBackend(unavailable=True)).list_jdwp_processes("emulator-5554")

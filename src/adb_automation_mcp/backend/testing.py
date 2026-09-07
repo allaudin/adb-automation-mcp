@@ -138,6 +138,11 @@ class FakeBackend:
         procstats_result: CommandResult | None = None,
         am_dumpheap_result: CommandResult | None = None,
         activity_exit_info_result: CommandResult | None = None,
+        binder_calls_stats_result: CommandResult | None = None,
+        binder_calls_stats_reset_result: CommandResult | None = None,
+        set_debug_app_result: CommandResult | None = None,
+        clear_debug_app_result: CommandResult | None = None,
+        jdwp_result: CommandResult | None = None,
         gfxinfo_framestats_result: CommandResult | None = None,
         gfxinfo_reset_result: CommandResult | None = None,
         perfetto_result: CommandResult | None = None,
@@ -1097,6 +1102,58 @@ class FakeBackend:
             exit_code=0,
             duration_ms=60.0,
         )
+        # `adb shell dumpsys binder_calls_stats` — the header (Start time,
+        # Sampling interval period), the Per-UID Summary rows, the "Summary:"
+        # totals line, and the "Exceptions thrown" section. Transcribed from
+        # live car-AVD output; the two Summary rows are hand-shaped to a
+        # populated state (the emulator's collection is off by default, giving
+        # calls_count=0) so top-caller parsing is exercised by default.
+        self._binder_calls_stats_result = binder_calls_stats_result or CommandResult(
+            stdout=(
+                "Start time: 2026-09-07 07:48:14\n"
+                "On battery time (ms): 0\n"
+                "Sampling interval period: 1000\n"
+                "Sharding modulo: 1\n"
+                "Per-UID raw data (top 90% by cpu time) (package/uid, worksource, call_desc, "
+                "screen_interactive, cpu_time_micros, ...):\n"
+                "\n"
+                "Per-UID Summary (top 90% by cpu time) (cpu_time, % of total cpu_time, "
+                "recorded_call_count, call_count, package/uid):\n"
+                "      123456      61.2%      40      512  com.android.systemui/10141\n"
+                "       45678      22.7%      12      210  system/1000\n"
+                "\n"
+                "  Summary: total_cpu_time=201512, calls_count=722, avg_call_cpu_time=279\n"
+                "\n"
+                "Exceptions thrown (exception_count, class_name):\n"
+                "       3 java.lang.SecurityException\n"
+                "       1 java.lang.IllegalStateException\n"
+                "\n"
+                "/!\\ Displayed data is sampled. See sampling interval at the top.\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=80.0,
+        )
+        # `adb shell dumpsys binder_calls_stats --reset` — "binder_calls_stats
+        # reset.", exit 0 (verified live).
+        self._binder_calls_stats_reset_result = binder_calls_stats_reset_result or CommandResult(
+            stdout="binder_calls_stats reset.\n", stderr="", exit_code=0, duration_ms=30.0
+        )
+        # `adb shell am set-debug-app [-w] [--persistent] <pkg>` and
+        # `am clear-debug-app` — both silent, exit 0 (verified live); neither
+        # validates the package, both idempotent.
+        self._set_debug_app_result = set_debug_app_result or CommandResult(
+            stdout="", stderr="", exit_code=0, duration_ms=40.0
+        )
+        self._clear_debug_app_result = clear_debug_app_result or CommandResult(
+            stdout="", stderr="", exit_code=0, duration_ms=30.0
+        )
+        # `adb -s <serial> jdwp` — one PID per line for each JDWP-exposing
+        # process. The real command never exits; SubprocessBackend.jdwp
+        # terminates it after a settle window and returns what it printed.
+        self._jdwp_result = jdwp_result or CommandResult(
+            stdout="1224\n1568\n2411\n", stderr="", exit_code=0, duration_ms=1500.0
+        )
         # `adb shell dumpsys gfxinfo <package> framestats` — the per-process
         # summary block get_frame_stats parses (totals, jank, percentiles, the
         # "Number <x>:" counters, HISTOGRAM). Transcribed/trimmed from live
@@ -1724,6 +1781,14 @@ class FakeBackend:
             return self._am_dumpheap_result
         if command.startswith("dumpsys activity exit-info"):
             return self._activity_exit_info_result
+        if command.startswith("dumpsys binder_calls_stats") and "--reset" in command:
+            return self._binder_calls_stats_reset_result
+        if command.startswith("dumpsys binder_calls_stats"):
+            return self._binder_calls_stats_result
+        if command.startswith("am set-debug-app "):
+            return self._set_debug_app_result
+        if command == "am clear-debug-app":
+            return self._clear_debug_app_result
         if command.startswith("dumpsys gfxinfo ") and command.endswith(" reset"):
             return self._gfxinfo_reset_result
         if command.startswith("dumpsys gfxinfo "):
@@ -1838,6 +1903,10 @@ class FakeBackend:
     async def reboot(self, serial: str, mode: str | None = None) -> CommandResult:
         self._raise_if_unavailable()
         return self._reboot_result
+
+    async def jdwp(self, serial: str, settle_s: float = 1.5) -> CommandResult:
+        self._raise_if_unavailable()
+        return self._jdwp_result
 
     async def bugreport(
         self, serial: str, local_path: str, timeout_s: float | None = None

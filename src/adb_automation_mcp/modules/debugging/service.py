@@ -1,11 +1,10 @@
-"""Domain logic for the debugging module: recent process-exit history for a
-package (`adb shell dumpsys activity exit-info <package>`).
+"""Domain logic for the debugging module:
 
-ActivityManager keeps a bounded `ApplicationExitInfo` ring per package. This
-parses those "ApplicationExitInfo #N:" blocks into typed records (reason,
-timestamp, pid, importance, pss/rss, whether a trace was captured) so an
-agent can explain why an app died without reading the dump. No records is a
-valid empty result.
+- recent process-exit history for a package (`adb shell dumpsys activity
+  exit-info <package>`), parsed into typed `ApplicationExitInfo` records;
+- setting / clearing ActivityManager's debug app (`adb shell am
+  set-debug-app` / `am clear-debug-app`);
+- listing processes that currently expose a JDWP transport (`adb jdwp`).
 """
 
 from __future__ import annotations
@@ -95,11 +94,110 @@ class ProcessExitHistory(BaseModel):
         )
 
 
+class SetDebugAppResult(BaseModel):
+    """Outcome of `adb shell am set-debug-app [-w] [--persistent] <package>`.
+
+    This only records the package as ActivityManager's debug app — it does
+    NOT attach a debugger. wait_for_debugger reflects whether `-w` was
+    passed (the next launch of the app blocks until a debugger connects);
+    persistent reflects `--persistent` (the setting survives reboot).
+    `am` doesn't validate the package, so an unknown one is not an error.
+    """
+
+    serial: str
+    package: str
+    wait_for_debugger: bool
+    persistent: bool
+
+    def summary(self) -> str:
+        wait = " (waits for debugger on next launch)" if self.wait_for_debugger else ""
+        return f"Set {self.package} as the debug app on {self.serial}{wait}."
+
+
+class ClearDebugAppResult(BaseModel):
+    """Outcome of `adb shell am clear-debug-app`.
+
+    Idempotent — `am` reports no error when no debug app was set, so
+    cleared is always true on success and does not imply one had been
+    configured.
+    """
+
+    serial: str
+    cleared: bool
+
+    def summary(self) -> str:
+        return f"Cleared the debug app on {self.serial}."
+
+
+class JdwpProcessList(BaseModel):
+    """PIDs of processes currently exposing a JDWP transport (`adb jdwp`).
+
+    Only debuggable processes appear here. An empty list is a normal
+    result. `adb jdwp` streams and never exits on its own, so this is a
+    snapshot taken after a short settle window.
+    """
+
+    serial: str
+    count: int
+    pids: list[int]
+
+    def summary(self) -> str:
+        if not self.count:
+            return f"No JDWP-debuggable processes on {self.serial}."
+        return f"{self.count} JDWP-debuggable process(es) on {self.serial}: {self.pids}."
+
+
 class DebuggingService:
-    """Reads process-exit history from a connected device."""
+    """Process-exit history, debug-app config, and JDWP listing for a device."""
 
     def __init__(self, backend: AdbBackend) -> None:
         self._backend = backend
+
+    async def set_debug_app(
+        self,
+        serial: str,
+        package: str,
+        wait_for_debugger: bool = False,
+        persistent: bool = False,
+    ) -> SetDebugAppResult:
+        if not package.strip():
+            raise InvalidArgumentError(
+                "package must be a non-empty package name.", details={"package": package}
+            )
+        parts = ["am", "set-debug-app"]
+        if wait_for_debugger:
+            parts.append("-w")
+        if persistent:
+            parts.append("--persistent")
+        parts.append(shlex.quote(package))
+        result = await self._backend.shell(serial, " ".join(parts))
+        _raise_for_shell_failure(serial, result)
+        return SetDebugAppResult(
+            serial=serial,
+            package=package,
+            wait_for_debugger=wait_for_debugger,
+            persistent=persistent,
+        )
+
+    async def clear_debug_app(self, serial: str) -> ClearDebugAppResult:
+        result = await self._backend.shell(serial, "am clear-debug-app")
+        _raise_for_shell_failure(serial, result)
+        return ClearDebugAppResult(serial=serial, cleared=True)
+
+    async def list_jdwp_processes(self, serial: str) -> JdwpProcessList:
+        result = await self._backend.jdwp(serial)
+        if result.exit_code != 0:
+            message = (result.stderr or result.stdout).strip() or "adb jdwp exited non-zero."
+            if "not found" in message or "offline" in message:
+                raise DeviceNotFoundError(message, details={"serial": serial})
+            raise BackendError(message, details={"serial": serial, "exit_code": result.exit_code})
+        pids = [int(tok) for tok in result.stdout.split() if tok.isdigit()]
+        # preserve first-seen order, drop duplicates
+        seen: dict[int, None] = {}
+        for pid in pids:
+            seen.setdefault(pid, None)
+        ordered = list(seen)
+        return JdwpProcessList(serial=serial, count=len(ordered), pids=ordered)
 
     async def get_process_exit_history(self, serial: str, package: str) -> ProcessExitHistory:
         if not package.strip():

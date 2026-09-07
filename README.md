@@ -84,7 +84,7 @@ uv run mkdocs build --strict   # docs site
 
 ## Tools
 
-**97 tools.** Full signatures, docstrings, and worked examples are in the
+**102 tools.** Full signatures, docstrings, and worked examples are in the
 [tool reference](https://allaudin.github.io/adb-automation-mcp/reference/diagnostics/).
 Tools marked † are `destructive` — not registered unless
 `ADB_AUTOMATION_ALLOW_DESTRUCTIVE=1`.
@@ -96,11 +96,12 @@ Tools marked † are `destructive` — not registered unless
 | `android_services` (4) | `start_service`, `start_foreground_service`, `stop_service`, `get_service_status` |
 | `anr` (1) | `get_anr_reports` |
 | `app_data` (2) | `clear_app_data`†, `clear_app_cache` |
+| `binder` (2) | `get_binder_call_stats`, `reset_binder_call_stats` |
 | `broadcasts` (1) | `send_broadcast` |
 | `connection` (6) | `restart_adb_server`, `connect_device`, `disconnect_device`, `restart_adbd_as_root`†, `restart_adbd_as_shell`, `wait_for_device_state` |
 | `content` (1) | `query_content` |
 | `date_time` (1) | `get_date_time` |
-| `debugging` (1) | `get_process_exit_history` |
+| `debugging` (4) | `get_process_exit_history`, `set_debug_app`, `clear_debug_app`, `list_jdwp_processes` |
 | `device_info` (1) | `list_connected_devices` |
 | `diagnostics` (3) | `check_adb_available`, `get_adb_version`, `generate_bugreport` |
 | `displays` (3) | `list_displays`, `get_display_size`, `get_display_density` |

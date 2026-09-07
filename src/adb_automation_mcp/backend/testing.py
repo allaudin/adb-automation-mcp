@@ -133,6 +133,8 @@ class FakeBackend:
         dumpsys_meminfo_result: CommandResult | None = None,
         content_query_result: CommandResult | None = None,
         instrument_result: CommandResult | None = None,
+        dropbox_print_result: CommandResult | None = None,
+        dropbox_system_anr_result: CommandResult | None = None,
         pull_result: CommandResult | None = None,
         forward_result: CommandResult | None = None,
         forward_list_result: CommandResult | None = None,
@@ -817,6 +819,90 @@ class FakeBackend:
             exit_code=0,
             duration_ms=1800.0,
         )
+        # `adb shell dumpsys dropbox --print data_app_anr` — the DropBox
+        # preamble, then one `====`-delimited entry per record: a "<timestamp>
+        # <tag> (text, N bytes)" header line, a `Key: value` header block, a
+        # blank line, then the body (the `Subject:` line lives in the body, not
+        # the header block — verified live on a car AVD). Two entries for
+        # com.example.app plus one for a different package, so package filtering
+        # is exercised. `--print` takes ONE tag, so the service also issues a
+        # `... system_app_anr` call — see _dropbox_system_anr_result. Override
+        # to simulate the "(No entries found.)" empty case or a failure.
+        self._dropbox_print_result = dropbox_print_result or CommandResult(
+            stdout=(
+                "Drop box contents: 1000 entries\n"
+                "Max entries: 1000\n"
+                "Low priority rate limit period: 2000 ms\n"
+                "Low priority tags: {data_app_wtf, system_app_strictmode}\n"
+                "Searching for: data_app_anr\n"
+                "\n"
+                "========================================\n"
+                "2026-09-06 16:50:01 data_app_anr (text, 1180 bytes)\n"
+                "Process: com.example.app\n"
+                "PID: 12345\n"
+                "UID: 10234\n"
+                "Flags: 0x30c8be45\n"
+                "Package: com.example.app v450 (4.5.0)\n"
+                "Build: Android/sdk_car_x86_64/emulator_car64_x86_64:Baklava/CP2A.260605.016/"
+                "eng.allaud:userdebug/test-keys\n"
+                "\n"
+                "Subject: ANR in com.example.app (com.example.app/.MainActivity)\n"
+                "PID: 12345\n"
+                "Reason: Input dispatching timed out "
+                "(e39a3f8 com.example.app/.MainActivity, 5007.7ms elapsed)\n"
+                "Load: 3.1 / 2.8 / 2.5\n"
+                "\n"
+                '"main" prio=5 tid=1 Blocked\n'
+                "  | group=\"main\" sCount=1 ucsCount=0 flags=1 obj=0x72c8d418 self=0xb400007cf...\n"
+                "  at com.example.app.MainActivity.onResume(MainActivity.java:88)\n"
+                "  - waiting to lock <0x0abc1234> held by thread 12\n"
+                "  at android.app.Activity.performResume(Activity.java:8944)\n"
+                "\n"
+                "========================================\n"
+                "2026-09-06 16:52:25 data_app_anr (text, 1042 bytes)\n"
+                "Process: com.example.app\n"
+                "PID: 12777\n"
+                "UID: 10234\n"
+                "Flags: 0x30c8be45\n"
+                "Package: com.example.app v450 (4.5.0)\n"
+                "\n"
+                "Subject: ANR in com.example.app (com.example.app/.DetailActivity)\n"
+                "Reason: executing service com.example.app/.SyncService\n"
+                "\n"
+                '"main" prio=5 tid=1 Native\n'
+                "  at libcore.io.Linux.read(Native Method)\n"
+                "  at com.example.app.SyncService.blockingCall(SyncService.java:210)\n"
+                "\n"
+                "========================================\n"
+                "2026-09-06 16:40:10 data_app_anr (text, 900 bytes)\n"
+                "Process: com.other.app\n"
+                "PID: 20001\n"
+                "UID: 10250\n"
+                "Flags: 0x30c8be45\n"
+                "Package: com.other.app v10 (1.0)\n"
+                "\n"
+                "Subject: ANR in com.other.app\n"
+                '"main" prio=5 tid=1 Suspended\n'
+                "  at com.other.app.Foo.bar(Foo.java:5)\n"
+                "\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=140.0,
+        )
+        # `adb shell dumpsys dropbox --print system_app_anr` — the default has no
+        # system-app ANR entries (the sample data lives under data_app_anr).
+        self._dropbox_system_anr_result = dropbox_system_anr_result or CommandResult(
+            stdout=(
+                "Drop box contents: 1000 entries\n"
+                "Searching for: system_app_anr\n"
+                "\n"
+                "(No entries found.)\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=90.0,
+        )
         self._dumpsys_meminfo_result = dumpsys_meminfo_result or CommandResult(
             stdout=(
                 "Applications Memory Usage (in Kilobytes):\n"
@@ -1391,6 +1477,10 @@ class FakeBackend:
             return self._wm_density_result
         if command.startswith("dumpsys meminfo "):
             return self._dumpsys_meminfo_result
+        if command.startswith("dumpsys dropbox --print system_app_anr"):
+            return self._dropbox_system_anr_result
+        if command.startswith("dumpsys dropbox"):
+            return self._dropbox_print_result
         if command == "dumpsys power":
             return self._dumpsys_power_result
         if command == "dumpsys connectivity":

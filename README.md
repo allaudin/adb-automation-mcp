@@ -84,7 +84,7 @@ uv run mkdocs build --strict   # docs site
 
 ## Tools
 
-**86 tools.** Full signatures, docstrings, and worked examples are in the
+**87 tools.** Full signatures, docstrings, and worked examples are in the
 [tool reference](https://allaudin.github.io/adb-automation-mcp/reference/diagnostics/).
 Tools marked † are `destructive` — not registered unless
 `ADB_AUTOMATION_ALLOW_DESTRUCTIVE=1`.
@@ -94,6 +94,7 @@ Tools marked † are `destructive` — not registered unless
 |---|---|
 | `activities` (3) | `start_activity`, `resolve_activity`, `get_foreground_activity` |
 | `android_services` (4) | `start_service`, `start_foreground_service`, `stop_service`, `get_service_status` |
+| `anr` (1) | `get_anr_reports` |
 | `app_data` (2) | `clear_app_data`†, `clear_app_cache` |
 | `broadcasts` (1) | `send_broadcast` |
 | `connection` (6) | `restart_adb_server`, `connect_device`, `disconnect_device`, `restart_adbd_as_root`†, `restart_adbd_as_shell`, `wait_for_device_state` |

@@ -84,7 +84,7 @@ uv run mkdocs build --strict   # docs site
 
 ## Tools
 
-**61 tools.** Full signatures, docstrings, and worked examples are in the
+**66 tools.** Full signatures, docstrings, and worked examples are in the
 [tool reference](https://allaudin.github.io/adb-automation-mcp/reference/diagnostics/).
 Tools marked † are `destructive` — not registered unless
 `ADB_AUTOMATION_ALLOW_DESTRUCTIVE=1`.
@@ -94,14 +94,14 @@ Tools marked † are `destructive` — not registered unless
 |---|---|
 | `activities` (3) | `start_activity`, `resolve_activity`, `get_foreground_activity` |
 | `android_services` (4) | `start_service`, `start_foreground_service`, `stop_service`, `get_service_status` |
-| `app_data` (1) | `clear_app_data`† |
+| `app_data` (2) | `clear_app_data`†, `clear_app_cache` |
 | `broadcasts` (1) | `send_broadcast` |
 | `connection` (6) | `restart_adb_server`, `connect_device`, `disconnect_device`, `restart_adbd_as_root`†, `restart_adbd_as_shell`, `wait_for_device_state` |
 | `date_time` (1) | `get_date_time` |
 | `device_info` (1) | `list_connected_devices` |
 | `diagnostics` (2) | `check_adb_available`, `get_adb_version` |
-| `files` (1) | `pull_file` |
-| `input` (1) | `tap` |
+| `files` (2) | `pull_file`, `push_file` |
+| `input` (4) | `tap`, `swipe`, `input_text`, `press_key` |
 | `logger` (6) | `read_logs`, `clear_logs`, `get_log_buffer_size`, `read_package_logs`, `start_log_session`, `stop_log_session` |
 | `network` (1) | `list_network_interfaces` |
 | `packages` (7) | `list_packages`, `install_apk`, `uninstall_package`†, `install_existing_for_user`, `get_package_path`, `get_package_info`, `set_package_enabled_state` |

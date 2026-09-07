@@ -126,3 +126,59 @@ async def test_clear_app_data_tool_backend_failure_returns_backend_error() -> No
     assert result.data.status == "error"
     assert result.data.error is not None
     assert result.data.error.code == "BACKEND_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_clear_app_cache_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "clear_app_cache", {"serial": "emulator-5554", "package_name": "com.example.app"}
+        )
+    assert result.data.status == "success"
+    assert result.data.data.success is True
+
+
+@pytest.mark.asyncio
+async def test_clear_app_cache_tool_unsupported_falls_back_to_rm() -> None:
+    mcp = _build_test_server(
+        FakeBackend(
+            pm_clear_cache_result=CommandResult(
+                stdout="", stderr="Error: Unknown option: --cache-only\n", exit_code=1, duration_ms=5.0
+            )
+        )
+    )
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "clear_app_cache", {"serial": "emulator-5554", "package_name": "com.example.app"}
+        )
+    assert result.data.status == "success"
+    assert result.data.data.method == "rm_cache_dirs"
+
+
+@pytest.mark.asyncio
+async def test_clear_app_cache_tool_rm_fallback_denied_serializes_as_cache_only_unsupported() -> None:
+    mcp = _build_test_server(
+        FakeBackend(
+            pm_clear_cache_timeout=True,
+            rm_cache_result=CommandResult(
+                stdout="", stderr="rm: /data/user/0/x/cache: Permission denied\n",
+                exit_code=1, duration_ms=5.0,
+            ),
+        )
+    )
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "clear_app_cache", {"serial": "emulator-5554", "package_name": "com.example.app"}
+        )
+    assert result.data.status == "error"
+    assert result.data.error is not None
+    assert result.data.error.code == "CACHE_ONLY_UNSUPPORTED"
+
+
+@pytest.mark.asyncio
+async def test_clear_app_cache_tool_is_registered() -> None:
+    mcp = _build_test_server(FakeBackend())
+    async with Client(mcp) as client:
+        names = {t.name for t in await client.list_tools()}
+    assert "clear_app_cache" in names

@@ -77,3 +77,66 @@ async def test_tap_tool_adb_failure_returns_device_not_found_error() -> None:
     assert result.data.status == "error"
     assert result.data.error is not None
     assert result.data.error.code == "DEVICE_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_swipe_tool_round_trips_over_mcp_protocol() -> None:
+    captured: dict[str, str] = {}
+
+    class Rec(FakeBackend):
+        async def shell(self, serial: str, command: str) -> CommandResult:
+            captured["command"] = command
+            return await super().shell(serial, command)
+
+    mcp = _build_test_server(Rec())
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "swipe",
+            {"serial": "emulator-5554", "x1": 100, "y1": 800, "x2": 100, "y2": 200, "duration_ms": 250},
+        )
+    assert result.data.status == "success"
+    assert captured["command"] == "input swipe 100 800 100 200 250"
+
+
+@pytest.mark.asyncio
+async def test_input_text_tool_round_trips_over_mcp_protocol() -> None:
+    captured: dict[str, str] = {}
+
+    class Rec(FakeBackend):
+        async def shell(self, serial: str, command: str) -> CommandResult:
+            captured["command"] = command
+            return await super().shell(serial, command)
+
+    mcp = _build_test_server(Rec())
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "input_text", {"serial": "emulator-5554", "text": "hello world"}
+        )
+    assert result.data.status == "success"
+    assert captured["command"] == "input text hello%sworld"
+    assert result.data.data.text == "hello world"
+
+
+@pytest.mark.asyncio
+async def test_press_key_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+    async with Client(mcp) as client:
+        result = await client.call_tool("press_key", {"serial": "emulator-5554", "key": "BACK"})
+    assert result.data.status == "success"
+    assert result.data.data.keycode == "KEYCODE_BACK"
+
+
+@pytest.mark.asyncio
+async def test_press_key_tool_rejects_unknown_key_via_schema() -> None:
+    mcp = _build_test_server(FakeBackend())
+    async with Client(mcp) as client:
+        with pytest.raises(Exception):  # noqa: B017
+            await client.call_tool("press_key", {"serial": "emulator-5554", "key": "BOGUS"})
+
+
+@pytest.mark.asyncio
+async def test_new_input_tools_are_registered() -> None:
+    mcp = _build_test_server(FakeBackend())
+    async with Client(mcp) as client:
+        names = {t.name for t in await client.list_tools()}
+    assert {"swipe", "input_text", "press_key"} <= names

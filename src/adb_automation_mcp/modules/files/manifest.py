@@ -10,7 +10,7 @@ from pathlib import Path
 
 from adb_automation_mcp.backend.protocol import AdbBackend
 from adb_automation_mcp.modules.files.service import FilesService
-from adb_automation_mcp.modules.files.tools import pull_file
+from adb_automation_mcp.modules.files.tools import pull_file, push_file
 from adb_automation_mcp.registry import ModuleManifest
 
 
@@ -27,6 +27,6 @@ def _service_factory(backend: AdbBackend) -> FilesService:
 MODULE = ModuleManifest(
     name="files",
     service_factory=_service_factory,
-    tools=[pull_file],
+    tools=[pull_file, push_file],
     resources=[],
 )

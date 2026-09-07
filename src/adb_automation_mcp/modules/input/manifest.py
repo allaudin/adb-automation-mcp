@@ -6,12 +6,12 @@ registers at server startup.
 from __future__ import annotations
 
 from adb_automation_mcp.modules.input.service import InputService
-from adb_automation_mcp.modules.input.tools import tap
+from adb_automation_mcp.modules.input.tools import input_text, press_key, swipe, tap
 from adb_automation_mcp.registry import ModuleManifest
 
 MODULE = ModuleManifest(
     name="input",
     service_factory=InputService,
-    tools=[tap],
+    tools=[tap, swipe, input_text, press_key],
     resources=[],
 )

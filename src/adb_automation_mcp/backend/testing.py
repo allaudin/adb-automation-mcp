@@ -130,8 +130,15 @@ class FakeBackend:
         reverse_list_result: CommandResult | None = None,
         reverse_remove_result: CommandResult | None = None,
         clear_app_data_result: CommandResult | None = None,
+        pm_clear_cache_result: CommandResult | None = None,
+        pm_clear_cache_timeout: bool = False,
+        rm_cache_result: CommandResult | None = None,
+        push_result: CommandResult | None = None,
         exec_out_result: ExecOutResult | None = None,
         input_tap_result: CommandResult | None = None,
+        input_swipe_result: CommandResult | None = None,
+        input_text_result: CommandResult | None = None,
+        input_keyevent_result: CommandResult | None = None,
         uiautomator_dump_result: CommandResult | None = None,
         ui_hierarchy_cat_result: CommandResult | None = None,
         grant_permission_result: CommandResult | None = None,
@@ -724,6 +731,44 @@ class FakeBackend:
         self._clear_app_data_result = clear_app_data_result or CommandResult(
             stdout="Success\n", stderr="", exit_code=0, duration_ms=110.0
         )
+        # `adb shell pm clear --cache-only [--user N] PACKAGE` — same
+        # "Success"/"Failed" wording as an unscoped clear on a build that
+        # supports it. NOTE: the car AVD this project targets *hangs*
+        # indefinitely on this command (a build bug), so real runs surface as
+        # AdbTimeoutError — see AppDataService.clear_app_cache. Override with a
+        # non-zero result to simulate the "--cache-only not supported" case.
+        self._pm_clear_cache_result = pm_clear_cache_result or CommandResult(
+            stdout="Success\n", stderr="", exit_code=0, duration_ms=120.0
+        )
+        self._pm_clear_cache_timeout = pm_clear_cache_timeout
+        # `rm -rf <per-user cache dirs>` — the fallback when `pm clear
+        # --cache-only` is unsupported/hangs. Silent on success (exit 0) as
+        # root; "Permission denied" (exit 1) when adbd isn't root. Verified live
+        # on a car AVD.
+        self._rm_cache_result = rm_cache_result or CommandResult(
+            stdout="", stderr="", exit_code=0, duration_ms=40.0
+        )
+        # `adb push LOCAL REMOTE` — real wording: "<local>: 1 file pushed, 0
+        # skipped. <rate> (<n> bytes in <t>s)". Captured live from a car AVD.
+        self._push_result = push_result or CommandResult(
+            stdout=(
+                "/host/file: 1 file pushed, 0 skipped. 0.0 MB/s (3 bytes in 0.000s)\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=90.0,
+        )
+        # `input swipe`/`input text`/`input keyevent` — all silent on success
+        # (no stdout), exit 0. Captured live from a car AVD.
+        self._input_swipe_result = input_swipe_result or CommandResult(
+            stdout="", stderr="", exit_code=0, duration_ms=50.0
+        )
+        self._input_text_result = input_text_result or CommandResult(
+            stdout="", stderr="", exit_code=0, duration_ms=45.0
+        )
+        self._input_keyevent_result = input_keyevent_result or CommandResult(
+            stdout="", stderr="", exit_code=0, duration_ms=40.0
+        )
         # `adb exec-out screencap -p` — streams the raw PNG on stdout, nothing
         # on stderr, exit 0. The default fixture is a real (tiny) PNG; see
         # _FAKE_SCREENCAP_PNG above.
@@ -979,6 +1024,16 @@ class FakeBackend:
                 exit_code=0,
                 duration_ms=300.0,
             )
+        if command.startswith("pm clear --cache-only "):
+            if self._pm_clear_cache_timeout:
+                raise AdbTimeoutError(
+                    "adb command timed out (simulated).",
+                    details={"command": command},
+                    remediation="Retrying is reasonable.",
+                )
+            return self._pm_clear_cache_result
+        if command.startswith("rm -rf ") and "/cache" in command:
+            return self._rm_cache_result
         if command.startswith("pm clear "):
             return self._clear_app_data_result
         if command.startswith("am broadcast "):
@@ -1001,6 +1056,12 @@ class FakeBackend:
             return self._force_stop_result
         if command.startswith("input ") and " tap " in command:
             return self._input_tap_result
+        if command.startswith("input ") and " swipe " in command:
+            return self._input_swipe_result
+        if command.startswith("input ") and " text " in command:
+            return self._input_text_result
+        if command.startswith("input ") and " keyevent " in command:
+            return self._input_keyevent_result
         if command.startswith("uiautomator dump "):
             return self._uiautomator_dump_result
         if command.startswith("cat ") and "adb_automation_mcp_ui_dump_" in command:
@@ -1029,7 +1090,8 @@ class FakeBackend:
         raise NotImplementedError("FakeBackend.uninstall: no module needs this yet")
 
     async def push(self, serial: str, local_path: str, remote_path: str) -> CommandResult:
-        raise NotImplementedError("FakeBackend.push: no module needs this yet")
+        self._raise_if_unavailable()
+        return self._push_result
 
     async def forward(
         self, serial: str, local: str, remote: str, no_rebind: bool

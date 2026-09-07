@@ -12,6 +12,7 @@ from adb_automation_mcp.errors import (
     AdbUnavailableError,
     BackendError,
     DeviceNotFoundError,
+    PermissionDeniedError,
     PowerStateUnavailableError,
 )
 from adb_automation_mcp.modules.power.service import PowerService
@@ -164,3 +165,79 @@ async def test_reboot_device__unclassified_failure_raises_backend_error() -> Non
 async def test_reboot_device__backend_unavailable_raises_adb_unavailable() -> None:
     with pytest.raises(AdbUnavailableError):
         await PowerService(FakeBackend(unavailable=True)).reboot_device("emulator-5554")
+
+
+# --- wake_device ---------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_wake_device__sends_input_keyevent_wakeup() -> None:
+    captured: dict[str, str] = {}
+
+    class RecordingBackend(FakeBackend):
+        async def shell(
+            self, serial: str, command: str, timeout_s: float | None = None
+        ) -> CommandResult:
+            captured["command"] = command
+            return await super().shell(serial, command, timeout_s)
+
+    result = await PowerService(RecordingBackend()).wake_device("emulator-5554")
+
+    assert captured["command"] == "input keyevent WAKEUP"
+    assert result.serial == "emulator-5554"
+    assert result.keycode == "WAKEUP"
+    assert result.accepted is True
+
+
+@pytest.mark.asyncio
+async def test_wake_device__already_awake_is_idempotent_success() -> None:
+    # `input keyevent WAKEUP` is silent + exit 0 whether or not the screen
+    # was actually asleep — waking an awake device is a no-op, not an error.
+    result = await PowerService(FakeBackend()).wake_device("emulator-5554")
+
+    assert result.accepted is True
+
+
+@pytest.mark.asyncio
+async def test_wake_device__unknown_serial_raises_device_not_found() -> None:
+    backend = FakeBackend(
+        input_keyevent_result=CommandResult(
+            stdout="", stderr="adb: device 'bogus' not found\n", exit_code=1, duration_ms=10.0
+        )
+    )
+
+    with pytest.raises(DeviceNotFoundError):
+        await PowerService(backend).wake_device("bogus")
+
+
+@pytest.mark.asyncio
+async def test_wake_device__permission_denial_raises_permission_denied() -> None:
+    backend = FakeBackend(
+        input_keyevent_result=CommandResult(
+            stdout="",
+            stderr="java.lang.SecurityException: Injecting to another application requires INJECT_EVENTS permission\nPermission Denial\n",
+            exit_code=1,
+            duration_ms=10.0,
+        )
+    )
+
+    with pytest.raises(PermissionDeniedError):
+        await PowerService(backend).wake_device("emulator-5554")
+
+
+@pytest.mark.asyncio
+async def test_wake_device__unclassified_failure_raises_backend_error() -> None:
+    backend = FakeBackend(
+        input_keyevent_result=CommandResult(
+            stdout="", stderr="input: not found\n", exit_code=127, duration_ms=5.0
+        )
+    )
+
+    with pytest.raises(BackendError):
+        await PowerService(backend).wake_device("emulator-5554")
+
+
+@pytest.mark.asyncio
+async def test_wake_device__backend_unavailable_raises_adb_unavailable() -> None:
+    with pytest.raises(AdbUnavailableError):
+        await PowerService(FakeBackend(unavailable=True)).wake_device("emulator-5554")

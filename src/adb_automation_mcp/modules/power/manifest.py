@@ -6,12 +6,12 @@ registers at server startup.
 from __future__ import annotations
 
 from adb_automation_mcp.modules.power.service import PowerService
-from adb_automation_mcp.modules.power.tools import get_power_state, reboot_device
+from adb_automation_mcp.modules.power.tools import get_power_state, reboot_device, wake_device
 from adb_automation_mcp.registry import ModuleManifest
 
 MODULE = ModuleManifest(
     name="power",
     service_factory=PowerService,
-    tools=[get_power_state, reboot_device],
+    tools=[get_power_state, reboot_device, wake_device],
     resources=[],
 )

@@ -28,6 +28,7 @@ nav:
   - Home: index.md
   - Architecture: ARCHITECTURE.md
   - Tool Reference:
+      - anr: reference/anr.md
       - diagnostics: reference/diagnostics.md
       - device_info: reference/device_info.md
       - connection: reference/connection.md

@@ -84,7 +84,7 @@ uv run mkdocs build --strict   # docs site
 
 ## Tools
 
-**66 tools.** Full signatures, docstrings, and worked examples are in the
+**71 tools.** Full signatures, docstrings, and worked examples are in the
 [tool reference](https://allaudin.github.io/adb-automation-mcp/reference/diagnostics/).
 Tools marked † are `destructive` — not registered unless
 `ADB_AUTOMATION_ALLOW_DESTRUCTIVE=1`.
@@ -100,6 +100,7 @@ Tools marked † are `destructive` — not registered unless
 | `date_time` (1) | `get_date_time` |
 | `device_info` (1) | `list_connected_devices` |
 | `diagnostics` (2) | `check_adb_available`, `get_adb_version` |
+| `displays` (1) | `list_displays` |
 | `files` (2) | `pull_file`, `push_file` |
 | `input` (4) | `tap`, `swipe`, `input_text`, `press_key` |
 | `logger` (6) | `read_logs`, `clear_logs`, `get_log_buffer_size`, `read_package_logs`, `start_log_session`, `stop_log_session` |
@@ -109,10 +110,10 @@ Tools marked † are `destructive` — not registered unless
 | `port_forwarding` (6) | `create_forward`, `list_forwards`, `remove_forward`, `create_reverse`, `list_reverses`, `remove_reverse` |
 | `power` (1) | `get_power_state` |
 | `processes` (1) | `force_stop_app` |
-| `screen` (1) | `take_screenshot` |
-| `settings` (1) | `get_setting` |
+| `screen` (2) | `take_screenshot`, `record_screen` |
+| `settings` (2) | `get_setting`, `set_setting` |
 | `system_properties` (4) | `get_property`, `list_properties`, `get_property_metadata`, `set_property` |
-| `ui` (1) | `dump_ui_hierarchy` |
+| `ui` (3) | `dump_ui_hierarchy`, `find_ui_elements`, `wait_for_ui_element` |
 | `user` (8) | `get_current_user`, `dump_user`, `user_info`, `list_users`, `switch_user`, `create_user`, `remove_user`†, `get_user_capabilities` |
 <!-- /stats:tools-table -->
 

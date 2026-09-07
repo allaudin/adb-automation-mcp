@@ -276,6 +276,17 @@ class PortForwardConflictError(AdbError):
     code = "PORT_FORWARD_CONFLICT"
 
 
+class DisplayInfoUnavailableError(AdbError):
+    """`dumpsys display` ran but its output contained no recognizable display
+    records (neither a parseable `mViewports=[...]` line nor a `Display
+    States:` section) — every Android device has at least one display, so
+    zero parsed displays means the dump's format drifted or the output was
+    truncated/unrecognizable, not that there genuinely are none.
+    """
+
+    code = "DISPLAY_INFO_UNAVAILABLE"
+
+
 class DeviceClockUnavailableError(AdbError):
     """`date` ran but its output didn't match the machine-readable
     timestamp format this tool requests — e.g. because the device's `date`

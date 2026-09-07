@@ -9,6 +9,7 @@ NotImplementedError loudly rather than returning silently-wrong fake data.
 from __future__ import annotations
 
 import base64
+import shlex
 
 from adb_automation_mcp.backend.protocol import CommandResult, DeviceInfo, ExecOutResult
 from adb_automation_mcp.errors import AdbTimeoutError, AdbUnavailableError
@@ -144,6 +145,9 @@ class FakeBackend:
         grant_permission_result: CommandResult | None = None,
         revoke_permission_result: CommandResult | None = None,
         get_setting_result: CommandResult | None = None,
+        set_setting_result: CommandResult | None = None,
+        screenrecord_result: CommandResult | None = None,
+        dumpsys_display_result: CommandResult | None = None,
         dumpsys_power_result: CommandResult | None = None,
         ip_addr_show_result: CommandResult | None = None,
         device_timestamp_result: CommandResult | None = None,
@@ -834,6 +838,59 @@ class FakeBackend:
         self._get_setting_result = get_setting_result or CommandResult(
             stdout="128\n", stderr="", exit_code=0, duration_ms=40.0
         )
+        # `settings [--user N] put NAMESPACE KEY VALUE` — SettingsProvider is
+        # silent on success, exit 0 (verified live on a car AVD). A protected
+        # namespace/key surfaces as a SecurityException stack trace on a
+        # non-zero exit — override this fixture to simulate that.
+        self._set_setting_result = set_setting_result or CommandResult(
+            stdout="", stderr="", exit_code=0, duration_ms=45.0
+        )
+        # In-memory SettingsProvider stand-in: `put` records here, `get` reads
+        # back from here (falling through to _get_setting_result when a key was
+        # never written this session), so set_setting round-trip tests see the
+        # value they wrote. Keyed by "<namespace>/<key>".
+        self._settings_store: dict[str, str] = {}
+        # `screenrecord [options] REMOTE` — silent on success, exit 0, blocks
+        # for the whole --time-limit; `--verbose` adds progress lines on stdout.
+        # Captured live from a car AVD. A failure (encoder init, unwritable
+        # path) surfaces on stderr at a non-zero exit — override to simulate.
+        self._screenrecord_result = screenrecord_result or CommandResult(
+            stdout="", stderr="", exit_code=0, duration_ms=3000.0
+        )
+        # `dumpsys display` — a real dump is hundreds of lines; trimmed to the
+        # markers DisplaysService.list_displays parses: the "mViewports=[...]"
+        # line (one DisplayViewport{...} per active viewport) and the
+        # "Display States:" section ("Display Id=N" / "Display State=ON").
+        # Field shapes transcribed from live car-AVD output (single INTERNAL
+        # display, 1408x792, 160dpi); the second viewport row is hand-shaped to
+        # an EXTERNAL display so multi-display parsing is exercised by default.
+        self._dumpsys_display_result = dumpsys_display_result or CommandResult(
+            stdout=(
+                "DISPLAY MANAGER (dumpsys display)\n"
+                "  mViewports=[DisplayViewport{type=INTERNAL, valid=true, isActive=true, "
+                "displayId=0, uniqueId='local:4619827259835644672', physicalPort=0, "
+                "orientation=0, densityDpi=160, xDpi=160.0, yDpi=160.0, "
+                "logicalFrame=Rect(0, 0 - 1408, 792), physicalFrame=Rect(0, 0 - 1408, 792), "
+                "deviceWidth=1408, deviceHeight=792}, DisplayViewport{type=EXTERNAL, "
+                "valid=true, isActive=true, displayId=2, uniqueId='local:4619827259835644673', "
+                "physicalPort=1, orientation=0, densityDpi=213, xDpi=213.0, yDpi=213.0, "
+                "logicalFrame=Rect(0, 0 - 1920, 1080), physicalFrame=Rect(0, 0 - 1920, 1080), "
+                "deviceWidth=1920, deviceHeight=1080}]\n"
+                "  mStableDisplaySize=Point(1408, 792)\n"
+                "\n"
+                "Display States: size=2\n"
+                "---------------------\n"
+                "  Display Id=0\n"
+                "  Display State=ON\n"
+                "  Display Brightness=0.39763778\n"
+                "  Display Id=2\n"
+                "  Display State=OFF\n"
+                "  Display Brightness=0.0\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=160.0,
+        )
         # `dumpsys power` — a real dump is hundreds of lines; trimmed to the
         # PowerManagerService block this module actually parses. Shaped on
         # PowerManagerService.dump()'s documented, long-stable field names.
@@ -937,7 +994,9 @@ class FakeBackend:
         self._raise_if_unavailable()
         return self._exec_out_result
 
-    async def shell(self, serial: str, command: str) -> CommandResult:
+    async def shell(
+        self, serial: str, command: str, timeout_s: float | None = None
+    ) -> CommandResult:
         self._raise_if_unavailable()
         if command.startswith("dumpsys user --user "):
             if self._user_info_result is not None:
@@ -1070,8 +1129,27 @@ class FakeBackend:
             return self._grant_permission_result
         if command.startswith("pm revoke "):
             return self._revoke_permission_result
+        if command.startswith("settings ") and " put " in command:
+            tokens = shlex.split(command)
+            idx = tokens.index("put")
+            namespace, key, value = tokens[idx + 1], tokens[idx + 2], tokens[idx + 3]
+            if self._set_setting_result.exit_code == 0:
+                self._settings_store[f"{namespace}/{key}"] = value
+            return self._set_setting_result
         if command.startswith("settings ") and " get " in command:
+            tokens = shlex.split(command)
+            idx = tokens.index("get")
+            namespace, key = tokens[idx + 1], tokens[idx + 2]
+            stored = self._settings_store.get(f"{namespace}/{key}")
+            if stored is not None:
+                return CommandResult(
+                    stdout=f"{stored}\n", stderr="", exit_code=0, duration_ms=15.0
+                )
             return self._get_setting_result
+        if command.startswith("screenrecord "):
+            return self._screenrecord_result
+        if command == "dumpsys display":
+            return self._dumpsys_display_result
         if command == "dumpsys power":
             return self._dumpsys_power_result
         if command == "ip addr show":

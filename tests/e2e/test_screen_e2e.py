@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 from fastmcp import Client, FastMCP
 
-from adb_automation_mcp.backend.protocol import ExecOutResult
+from adb_automation_mcp.backend.protocol import CommandResult, ExecOutResult
 from adb_automation_mcp.backend.testing import FakeBackend
 from adb_automation_mcp.modules.screen.service import ScreenService
 from adb_automation_mcp.policy import PolicyConfig, PolicyEngine
@@ -130,3 +130,77 @@ async def test_take_screenshot_tool_unknown_serial_returns_device_not_found_erro
     assert result.data.status == "error"
     assert result.data.error is not None
     assert result.data.error.code == "DEVICE_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_record_screen_tool_records_and_returns_path(tmp_path: Path) -> None:
+    captured: dict[str, str] = {}
+
+    class RecordingBackend(FakeBackend):
+        async def shell(
+            self, serial: str, command: str, timeout_s: float | None = None
+        ) -> CommandResult:
+            if command.startswith("screenrecord "):
+                captured["command"] = command
+            return await super().shell(serial, command, timeout_s)
+
+    mcp = _build_test_server_with_local_root(RecordingBackend(), tmp_path)
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "record_screen",
+            {"serial": "emulator-5554", "duration_s": 3, "filename": "e2e", "size": "1280x720"},
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.local_path == str(tmp_path / "recordings" / "e2e.mp4")
+    assert result.data.data.duration_s == 3
+    assert result.data.data.size == "1280x720"
+    assert captured["command"].startswith("screenrecord --time-limit 3 --size 1280x720 ")
+
+
+@pytest.mark.asyncio
+async def test_record_screen_tool_no_local_root_returns_policy_denied(tmp_path: Path) -> None:
+    mcp = _build_test_server_with_local_root(FakeBackend(), None)
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "record_screen", {"serial": "emulator-5554", "duration_s": 3}
+        )
+
+    assert result.data.status == "error"
+    assert result.data.error is not None
+    assert result.data.error.code == "POLICY_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_record_screen_tool_bad_duration_returns_invalid_argument(tmp_path: Path) -> None:
+    mcp = _build_test_server_with_local_root(FakeBackend(), tmp_path)
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "record_screen", {"serial": "emulator-5554", "duration_s": 999}
+        )
+
+    assert result.data.status == "error"
+    assert result.data.error is not None
+    assert result.data.error.code == "INVALID_ARGUMENT"
+
+
+@pytest.mark.asyncio
+async def test_record_screen_tool_screenrecord_failure_returns_backend_error(tmp_path: Path) -> None:
+    backend = FakeBackend(
+        screenrecord_result=CommandResult(
+            stdout="", stderr="Unable to get IGraphicBufferProducer\n", exit_code=1, duration_ms=20.0
+        )
+    )
+    mcp = _build_test_server_with_local_root(backend, tmp_path)
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "record_screen", {"serial": "emulator-5554", "duration_s": 3}
+        )
+
+    assert result.data.status == "error"
+    assert result.data.error is not None
+    assert result.data.error.code == "BACKEND_ERROR"

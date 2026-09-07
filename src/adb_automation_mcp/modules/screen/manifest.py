@@ -10,7 +10,7 @@ from pathlib import Path
 
 from adb_automation_mcp.backend.protocol import AdbBackend
 from adb_automation_mcp.modules.screen.service import ScreenService
-from adb_automation_mcp.modules.screen.tools import take_screenshot
+from adb_automation_mcp.modules.screen.tools import record_screen, take_screenshot
 from adb_automation_mcp.registry import ModuleManifest
 
 
@@ -27,6 +27,6 @@ def _service_factory(backend: AdbBackend) -> ScreenService:
 MODULE = ModuleManifest(
     name="screen",
     service_factory=_service_factory,
-    tools=[take_screenshot],
+    tools=[take_screenshot, record_screen],
     resources=[],
 )

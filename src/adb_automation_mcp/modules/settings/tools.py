@@ -15,6 +15,7 @@ from adb_automation_mcp.modules.settings.service import (
     SettingsNamespace,
     SettingsService,
     SettingValue,
+    SettingWriteResult,
 )
 from adb_automation_mcp.registry import category
 
@@ -81,3 +82,78 @@ async def get_setting(
     services = cast("dict[str, object]", ctx.lifespan_context["services"])
     settings = cast(SettingsService, services["settings"])
     return await settings.get_setting(serial, namespace, key, user_id=user_id)
+
+
+@category("write")
+async def set_setting(
+    ctx: Context,
+    serial: str,
+    namespace: SettingsNamespace,
+    key: str,
+    value: str,
+    user_id: int | None = None,
+) -> SettingWriteResult:
+    """Write one Android Settings-provider value: `adb shell settings put NAMESPACE KEY VALUE`.
+
+    namespace is restricted to "system", "secure", or "global" by the
+    tool's own input schema, so an invalid namespace is rejected before any
+    adb command runs. The key is read once before the write and once after,
+    so the result carries both previous_value (keep it to restore the
+    original when your scenario is done) and new_value (what the provider
+    reports now). Deliberately distinct from system_properties' set_property
+    — Settings and system properties are unrelated Android subsystems.
+    Deleting a setting (`settings delete`) isn't implemented yet.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+        namespace: Which Settings namespace to write to: "system", "secure",
+            or "global".
+        key: The setting's key, e.g. "screen_brightness".
+        value: The value to write, as a string (numeric settings are still
+            passed as their decimal text, e.g. "128"). Passed as a single
+            shell-quoted argument.
+        user_id: Write the setting for one specific Android user (`--user`,
+            see list_users). Omit to use settings' default user.
+
+    Returns:
+        The serial, namespace, key, user_id, requested_value, previous_value
+        (None if the key had no value before), new_value (None if it has
+        none now), and changed (whether previous_value and new_value
+        differ). new_value != requested_value is returned as-is, not raised
+        — Android normalizes some values and silently ignores some
+        protected keys, and that's a real device outcome worth seeing.
+
+    Error handling:
+        An unknown serial or unresponsive adb binary raises
+        DEVICE_NOT_FOUND/ADB_UNAVAILABLE. A namespace/key the device refuses
+        to let the shell user write (SecurityException / "Permission
+        Denial") raises PERMISSION_DENIED. `settings put` reaching
+        SettingsProvider and being declined there (a Java stack trace /
+        "Exception occurred while executing 'put'") raises ANDROID_REJECTED.
+        Any other non-zero exit raises a generic BACKEND_ERROR.
+
+    Example:
+        Called with serial="emulator-5554", namespace="system",
+        key="screen_brightness", value="200". A typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "Set system:screen_brightness = '200' on emulator-5554 (was '128').",
+          "data": {
+            "serial": "emulator-5554",
+            "namespace": "system",
+            "key": "screen_brightness",
+            "requested_value": "200",
+            "previous_value": "128",
+            "new_value": "200",
+            "user_id": null,
+            "changed": true
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    settings = cast(SettingsService, services["settings"])
+    return await settings.set_setting(serial, namespace, key, value, user_id=user_id)

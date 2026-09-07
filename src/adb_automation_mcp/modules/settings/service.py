@@ -1,6 +1,6 @@
-"""Domain logic for the settings module: reading Android `Settings`
-provider values (`adb shell settings get NAMESPACE KEY`). Writing
-(`put`/`delete`) isn't implemented yet.
+"""Domain logic for the settings module: reading and writing Android
+`Settings` provider values (`adb shell settings get/put NAMESPACE KEY`).
+Deleting (`settings delete`) isn't implemented yet.
 
 Deliberately distinct from the system_properties module: `Settings`
 (system/secure/global, backed by SettingsProvider, `settings get/put`) and
@@ -18,7 +18,12 @@ from typing import Literal
 from pydantic import BaseModel
 
 from adb_automation_mcp.backend.protocol import AdbBackend, CommandResult
-from adb_automation_mcp.errors import BackendError, DeviceNotFoundError, PermissionDeniedError
+from adb_automation_mcp.errors import (
+    AndroidRejectionError,
+    BackendError,
+    DeviceNotFoundError,
+    PermissionDeniedError,
+)
 
 # The only three namespaces SettingsProvider recognizes for `settings get`.
 # Typed as a Literal (not a plain str) so an invalid namespace is rejected by
@@ -60,8 +65,48 @@ class SettingValue(BaseModel):
         return f"{self.namespace}:{self.key}={self.value!r} on {self.serial}."
 
 
+class SettingWriteResult(BaseModel):
+    """Outcome of writing one Android Settings-provider value (`adb shell
+    settings put NAMESPACE KEY VALUE`).
+
+    `settings put` is silent on success (exit 0) and reports nothing about
+    what the value was before, so set_setting reads the key once *before*
+    the write (`previous_value`) and once *after* (`new_value`) — giving a
+    caller everything it needs to restore the original afterwards, and to
+    see when a write didn't actually take. requested_value is the string
+    that was asked for; new_value is what the provider reports now (usually
+    identical, but Android normalizes some values and silently ignores some
+    protected keys — new_value != requested_value surfaces that without an
+    error, since it's a real, observable device outcome, not a failure).
+    previous_value / new_value are None when the key had / has no value in
+    that namespace (the literal "null"), same convention as
+    SettingValue.value.
+    """
+
+    serial: str
+    namespace: SettingsNamespace
+    key: str
+    requested_value: str
+    previous_value: str | None
+    new_value: str | None
+    user_id: int | None
+    changed: bool
+
+    def summary(self) -> str:
+        scope = f" for user {self.user_id}" if self.user_id is not None else ""
+        if not self.changed:
+            return (
+                f"{self.namespace}:{self.key} already {self.new_value!r} on "
+                f"{self.serial}{scope} — unchanged."
+            )
+        return (
+            f"Set {self.namespace}:{self.key} = {self.new_value!r} on {self.serial}{scope} "
+            f"(was {self.previous_value!r})."
+        )
+
+
 class SettingsService:
-    """Reads Android Settings-provider values on a connected device."""
+    """Reads and writes Android Settings-provider values on a connected device."""
 
     def __init__(self, backend: AdbBackend) -> None:
         self._backend = backend
@@ -69,6 +114,43 @@ class SettingsService:
     async def get_setting(
         self, serial: str, namespace: SettingsNamespace, key: str, user_id: int | None = None
     ) -> SettingValue:
+        value = await self._read_value(serial, namespace, key, user_id)
+        return SettingValue(
+            serial=serial, namespace=namespace, key=key, value=value, user_id=user_id
+        )
+
+    async def set_setting(
+        self,
+        serial: str,
+        namespace: SettingsNamespace,
+        key: str,
+        value: str,
+        user_id: int | None = None,
+    ) -> SettingWriteResult:
+        previous_value = await self._read_value(serial, namespace, key, user_id)
+
+        parts = ["settings"]
+        if user_id is not None:
+            parts.extend(["--user", str(user_id)])
+        parts.extend(["put", shlex.quote(namespace), shlex.quote(key), shlex.quote(value)])
+        put_result = await self._backend.shell(serial, " ".join(parts))
+        _raise_for_put_setting_failure(serial, namespace, key, put_result)
+
+        new_value = await self._read_value(serial, namespace, key, user_id)
+        return SettingWriteResult(
+            serial=serial,
+            namespace=namespace,
+            key=key,
+            requested_value=value,
+            previous_value=previous_value,
+            new_value=new_value,
+            user_id=user_id,
+            changed=previous_value != new_value,
+        )
+
+    async def _read_value(
+        self, serial: str, namespace: SettingsNamespace, key: str, user_id: int | None
+    ) -> str | None:
         parts = ["settings"]
         if user_id is not None:
             parts.extend(["--user", str(user_id)])
@@ -78,10 +160,7 @@ class SettingsService:
         _raise_for_get_setting_failure(serial, namespace, key, result)
 
         raw = result.stdout.strip()
-        value = None if raw == _NULL_VALUE_TEXT else raw
-        return SettingValue(
-            serial=serial, namespace=namespace, key=key, value=value, user_id=user_id
-        )
+        return None if raw == _NULL_VALUE_TEXT else raw
 
 
 def _raise_for_get_setting_failure(
@@ -97,6 +176,40 @@ def _raise_for_get_setting_failure(
         raise DeviceNotFoundError(message, details={"serial": serial})
     if "Permission Denial" in message or "Permission denied" in message:
         raise PermissionDeniedError(
+            message, details={"serial": serial, "namespace": namespace, "key": key}
+        )
+    raise BackendError(
+        message,
+        details={
+            "serial": serial,
+            "namespace": namespace,
+            "key": key,
+            "exit_code": result.exit_code,
+        },
+    )
+
+
+def _raise_for_put_setting_failure(
+    serial: str, namespace: SettingsNamespace, key: str, result: CommandResult
+) -> None:
+    if result.exit_code == 0:
+        return
+    message = (result.stderr or result.stdout).strip() or "adb shell settings put exited non-zero."
+    if message.startswith("adb:") and "not found" in message:
+        raise DeviceNotFoundError(message, details={"serial": serial})
+    if (
+        "Permission Denial" in message
+        or "Permission denied" in message
+        or "SecurityException" in message
+    ):
+        raise PermissionDeniedError(
+            message, details={"serial": serial, "namespace": namespace, "key": key}
+        )
+    # `settings put` reaching SettingsProvider and being refused there surfaces
+    # as a Java stack trace / "Exception occurred while executing 'put'" — the
+    # device processed the request and declined it, distinct from a bad call.
+    if "Exception occurred" in message or "at com.android." in message:
+        raise AndroidRejectionError(
             message, details={"serial": serial, "namespace": namespace, "key": key}
         )
     raise BackendError(

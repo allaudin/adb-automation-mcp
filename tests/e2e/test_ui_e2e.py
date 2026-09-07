@@ -110,3 +110,83 @@ async def test_dump_ui_hierarchy_tool_backend_unavailable_returns_adb_unavailabl
     assert result.data.status == "error"
     assert result.data.error is not None
     assert result.data.error.code == "ADB_UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_find_ui_elements_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "find_ui_elements", {"serial": "emulator-5554", "text": "Phone"}
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.match_count == 1
+    el = result.data.data.elements[0]
+    assert el.text == "Phone"
+    assert el.clickable is True
+    assert el.bounds.center_x == 200
+
+
+@pytest.mark.asyncio
+async def test_find_ui_elements_tool_no_match_is_success_with_zero() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "find_ui_elements", {"serial": "emulator-5554", "text": "NoSuchLabel"}
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.match_count == 0
+    assert result.data.data.elements == []
+
+
+@pytest.mark.asyncio
+async def test_find_ui_elements_tool_no_criteria_returns_invalid_argument() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("find_ui_elements", {"serial": "emulator-5554"})
+
+    assert result.data.status == "error"
+    assert result.data.error is not None
+    assert result.data.error.code == "INVALID_ARGUMENT"
+
+
+@pytest.mark.asyncio
+async def test_wait_for_ui_element_tool_present_immediately() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "wait_for_ui_element",
+            {"serial": "emulator-5554", "text": "Phone", "timeout_s": 1.0, "poll_interval_s": 0.1},
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.satisfied is True
+    assert result.data.data.condition == "present"
+    assert result.data.data.match_count == 1
+
+
+@pytest.mark.asyncio
+async def test_wait_for_ui_element_tool_times_out_as_structured_error() -> None:
+    mcp = _build_test_server(
+        FakeBackend(
+            ui_hierarchy_cat_result=CommandResult(
+                stdout='<hierarchy rotation="0" />', stderr="", exit_code=0, duration_ms=5.0
+            )
+        )
+    )
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "wait_for_ui_element",
+            {"serial": "emulator-5554", "text": "Phone", "timeout_s": 0.3, "poll_interval_s": 0.1},
+        )
+
+    assert result.data.status == "error"
+    assert result.data.error is not None
+    assert result.data.error.code == "TIMEOUT"

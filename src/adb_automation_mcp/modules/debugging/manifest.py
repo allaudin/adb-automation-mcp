@@ -6,12 +6,17 @@ registers at server startup.
 from __future__ import annotations
 
 from adb_automation_mcp.modules.debugging.service import DebuggingService
-from adb_automation_mcp.modules.debugging.tools import get_process_exit_history
+from adb_automation_mcp.modules.debugging.tools import (
+    clear_debug_app,
+    get_process_exit_history,
+    list_jdwp_processes,
+    set_debug_app,
+)
 from adb_automation_mcp.registry import ModuleManifest
 
 MODULE = ModuleManifest(
     name="debugging",
     service_factory=DebuggingService,
-    tools=[get_process_exit_history],
+    tools=[get_process_exit_history, set_debug_app, clear_debug_app, list_jdwp_processes],
     resources=[],
 )

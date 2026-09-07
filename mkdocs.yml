@@ -40,6 +40,7 @@ nav:
       - activities: reference/activities.md
       - app_data: reference/app_data.md
       - android_services: reference/android_services.md
+      - binder: reference/binder.md
       - broadcasts: reference/broadcasts.md
       - content: reference/content.md
       - date_time: reference/date_time.md

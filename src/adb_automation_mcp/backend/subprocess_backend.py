@@ -203,6 +203,48 @@ class SubprocessBackend:
         # minutes, so the caller passes a long timeout_s.
         return await self._run("-s", serial, "bugreport", local_path, timeout_s=timeout_s)
 
+    async def jdwp(self, serial: str, settle_s: float = 1.5) -> CommandResult:
+        # `adb -s <serial> jdwp` prints one PID per line for each process
+        # exposing a JDWP transport, then *keeps the connection open* to stream
+        # later changes — it never exits on its own. So: start it, let it print
+        # the current list, then terminate and return what it wrote.
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        try:
+            proc: Process = await asyncio.create_subprocess_exec(
+                self._adb_path,
+                "-s",
+                serial,
+                "jdwp",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except OSError as exc:
+            raise AdbUnavailableError(
+                f"Could not find or execute the adb binary at '{self._adb_path}'.",
+                details={"adb_path": self._adb_path, "os_error": str(exc)},
+                remediation="Install Android platform-tools and ensure 'adb' is on PATH.",
+            ) from exc
+
+        try:
+            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=settle_s)
+            exit_code = proc.returncode if proc.returncode is not None else 0
+        except asyncio.TimeoutError:
+            proc.terminate()
+            try:
+                stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=2.0)
+            except asyncio.TimeoutError:
+                proc.kill()
+                stdout_b, stderr_b = await proc.communicate()
+            exit_code = 0  # terminating it ourselves is the normal path, not a failure
+
+        return CommandResult(
+            stdout=stdout_b.decode("utf-8", errors="replace"),
+            stderr=stderr_b.decode("utf-8", errors="replace"),
+            exit_code=exit_code,
+            duration_ms=(loop.time() - start) * 1000,
+        )
+
 
 def _parse_devices(stdout: str) -> list[DeviceInfo]:
     devices: list[DeviceInfo] = []

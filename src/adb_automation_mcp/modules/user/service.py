@@ -14,7 +14,12 @@ import shlex
 from pydantic import BaseModel
 
 from adb_automation_mcp.backend.protocol import AdbBackend, CommandResult
-from adb_automation_mcp.errors import BackendError, DeviceNotFoundError, UserNotFoundError
+from adb_automation_mcp.errors import (
+    BackendError,
+    DeviceNotFoundError,
+    InvalidArgumentError,
+    UserNotFoundError,
+)
 
 
 class CurrentUser(BaseModel):
@@ -177,6 +182,74 @@ class UserCapabilities(BaseModel):
         )
 
 
+class StartUserResult(BaseModel):
+    """Outcome of `adb shell am start-user [-w] [--display N] USER`.
+
+    Starts a stopped user in the background (use switch_user to bring one to
+    the foreground instead). `am start-user` exits 0 whether it succeeds
+    ("Success: user started") or fails ("Error: could not start user"), so
+    started is read from the message text, not the exit code — a failure
+    raises rather than returning started=False. wait reflects whether `-w`
+    was passed (block until the user is unlocked). display_id is the
+    passenger/secondary display the user was made visible on when requested;
+    `--display` is only supported on some builds (typically automotive) and
+    an unsupported request surfaces as a BACKEND_ERROR carrying the device's
+    own message.
+    """
+
+    serial: str
+    user_id: int
+    wait: bool
+    display_id: int | None
+    started: bool
+    output: str
+
+    def summary(self) -> str:
+        where = "" if self.display_id is None else f" on display {self.display_id}"
+        return f"Started user {self.user_id}{where} on {self.serial}."
+
+
+class UserStoppedState(BaseModel):
+    """Whether an Android user is in the stopped state
+    (`adb shell am is-user-stopped USER`).
+
+    stopped is the bare boolean `am` reports. A user id that doesn't exist
+    is reported as stopped=True (verified live), not an error — the command
+    can't distinguish "stopped" from "no such user".
+    """
+
+    serial: str
+    user_id: int
+    stopped: bool
+
+    def summary(self) -> str:
+        state = "stopped" if self.stopped else "not stopped"
+        return f"User {self.user_id} on {self.serial} is {state}."
+
+
+class UserRunState(BaseModel):
+    """ActivityManager lifecycle state for a started user
+    (`adb shell am get-started-user-state USER`).
+
+    started is False (and state is None) when the user isn't currently
+    started ("User is not started: <id>") — a normal result, not an error.
+    Otherwise state is the raw lifecycle token as `am` reports it
+    ("BOOTING", "RUNNING_LOCKED", "RUNNING_UNLOCKING", "RUNNING_UNLOCKED",
+    "STOPPING", "SHUTDOWN"); it's returned verbatim rather than as a closed
+    enum since the set has changed across Android versions.
+    """
+
+    serial: str
+    user_id: int
+    started: bool
+    state: str | None
+
+    def summary(self) -> str:
+        if not self.started:
+            return f"User {self.user_id} on {self.serial} is not started."
+        return f"User {self.user_id} on {self.serial}: {self.state}."
+
+
 class UserService:
     """Reads and changes Android user state on a connected device."""
 
@@ -242,6 +315,73 @@ class UserService:
         result = await self._backend.shell(serial, f"pm remove-user {user_id}")
         self._raise_for_shell_failure(serial, result)
         return RemoveUserResult(serial=serial, user_id=user_id)
+
+    async def start_user(
+        self,
+        serial: str,
+        user_id: int,
+        wait: bool = False,
+        display_id: int | None = None,
+    ) -> StartUserResult:
+        _validate_user_id(user_id)
+        if display_id is not None and display_id < 0:
+            raise InvalidArgumentError(
+                "display_id must be a non-negative logical display id.",
+                details={"serial": serial, "display_id": display_id},
+            )
+        parts = ["am", "start-user"]
+        if wait:
+            parts.append("-w")
+        if display_id is not None:
+            parts.extend(["--display", str(display_id)])
+        parts.append(str(user_id))
+
+        result = await self._backend.shell(serial, " ".join(parts))
+        self._raise_for_shell_failure(serial, result)
+        message = (result.stdout + result.stderr).strip()
+        if "Success" not in message:
+            raise BackendError(
+                message or "am start-user produced no output.",
+                details={"serial": serial, "user_id": user_id},
+            )
+        return StartUserResult(
+            serial=serial,
+            user_id=user_id,
+            wait=wait,
+            display_id=display_id,
+            started=True,
+            output=message,
+        )
+
+    async def is_user_stopped(self, serial: str, user_id: int) -> UserStoppedState:
+        _validate_user_id(user_id)
+        result = await self._backend.shell(serial, f"am is-user-stopped {user_id}")
+        self._raise_for_shell_failure(serial, result)
+        stopped = _parse_bool_output(result.stdout)
+        if stopped is None:
+            raise BackendError(
+                result.stdout.strip() or "am is-user-stopped returned unexpected output.",
+                details={"serial": serial, "user_id": user_id},
+            )
+        return UserStoppedState(serial=serial, user_id=user_id, stopped=stopped)
+
+    async def get_user_state(self, serial: str, user_id: int) -> UserRunState:
+        _validate_user_id(user_id)
+        result = await self._backend.shell(serial, f"am get-started-user-state {user_id}")
+        self._raise_for_shell_failure(serial, result)
+        text = result.stdout.strip()
+        if not text:
+            raise BackendError(
+                "am get-started-user-state returned no output.",
+                details={"serial": serial, "user_id": user_id},
+            )
+        if text.startswith("User is not started"):
+            return UserRunState(serial=serial, user_id=user_id, started=False, state=None)
+        # The state token is the first whitespace-separated word; some builds
+        # append extra detail (e.g. "RUNNING_UNLOCKED (mUnlocked=true)").
+        return UserRunState(
+            serial=serial, user_id=user_id, started=True, state=text.split()[0]
+        )
 
     async def get_user_capabilities(self, serial: str) -> UserCapabilities:
         # Tier 1: old, universally-supported `pm` subcommands (multi-user
@@ -318,6 +458,14 @@ class UserService:
             # a missing capability, not a failure.
             return None
         return _parse_bool_output(result.stdout)
+
+
+def _validate_user_id(user_id: int) -> None:
+    if user_id < 0:
+        raise InvalidArgumentError(
+            "user_id must be a non-negative Android user id (see list_users).",
+            details={"user_id": user_id},
+        )
 
 
 def _is_device_transport_failure(message: str) -> bool:

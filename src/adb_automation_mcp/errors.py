@@ -288,6 +288,29 @@ class ConnectivityStateUnavailableError(AdbError):
     code = "CONNECTIVITY_STATE_UNAVAILABLE"
 
 
+class ContentProviderNotFoundError(AdbError):
+    """`adb shell content query` reached the device but no ContentProvider is
+    exported/registered for the requested authority (its "Could not find
+    provider: <authority>" / "Error while accessing provider" failure). The
+    `content` command reports this on stdout and still exits 0, so it's
+    surfaced here rather than swallowed as an empty result.
+    """
+
+    code = "CONTENT_PROVIDER_NOT_FOUND"
+
+
+class InstrumentationFailedError(AdbError):
+    """`adb shell am instrument` could not start the instrumentation at all
+    (its "INSTRUMENTATION_FAILED: <component>" / "Unable to find
+    instrumentation info" outcome) — the test package or runner class isn't
+    installed, or the component is malformed. `am` reports this on stdout and
+    still exits 0. Distinct from a run that started and then had test
+    failures, which is returned as data.
+    """
+
+    code = "INSTRUMENTATION_FAILED"
+
+
 class PortForwardConflictError(AdbError):
     """`adb forward --no-rebind` was asked to bind a host endpoint that already
     has a forward on it ("cannot rebind existing socket"). The caller explicitly

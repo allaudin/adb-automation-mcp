@@ -1,10 +1,9 @@
 """Domain logic for the power module: the device's current high-level power
-state (`adb shell dumpsys power`). `dumpsys power` output is large and
-carries many internal, unstable implementation details — this deliberately
-extracts only the two fields stable enough to trust: wakefulness and (when
-present) interactive state. Nothing else from the dump is modeled or
-exposed. Power-related control (reboot/shutdown/sleep/wake) isn't
-implemented yet.
+state (`adb shell dumpsys power`), plus rebooting it (`adb reboot`).
+`dumpsys power` output is large and carries many internal, unstable
+implementation details — this deliberately extracts only the two fields
+stable enough to trust: wakefulness and (when present) interactive state.
+Shutdown, sleep, and wake control aren't implemented yet.
 """
 
 from __future__ import annotations
@@ -56,11 +55,47 @@ class PowerState(BaseModel):
         return f"{self.wakefulness} on {self.serial}."
 
 
+class RebootResult(BaseModel):
+    """Outcome of requesting a device reboot (`adb -s <serial> reboot`).
+
+    `adb reboot` returns as soon as the request is delivered — long before
+    the device is back — so accepted just means adb accepted and forwarded
+    the request; it is *not* a signal that the device has finished
+    rebooting. Chain wait_for_device_state(serial, state="device") to block
+    until it's back online. The device dropping off the adb transport
+    immediately after this call is expected, not a failure.
+    """
+
+    serial: str
+    mode: str
+    accepted: bool
+    output: str
+
+    def summary(self) -> str:
+        return (
+            f"Reboot request accepted for {self.serial}; it will drop off adb "
+            "until it finishes booting."
+        )
+
+
 class PowerService:
-    """Reads the device's current high-level power state."""
+    """Reads the device's current high-level power state and reboots it."""
 
     def __init__(self, backend: AdbBackend) -> None:
         self._backend = backend
+
+    async def reboot_device(self, serial: str) -> RebootResult:
+        result = await self._backend.reboot(serial)
+        output = (result.stdout + result.stderr).strip()
+        if result.exit_code != 0:
+            message = output or "adb reboot exited non-zero."
+            # `adb -s <serial> reboot` against an unknown serial fails at the
+            # adb-client level with "error: device '<serial>' not found" (note:
+            # "error:", not the "adb:" prefix shell-routed commands use), exit 1.
+            if "not found" in message:
+                raise DeviceNotFoundError(message, details={"serial": serial})
+            raise BackendError(message, details={"serial": serial, "exit_code": result.exit_code})
+        return RebootResult(serial=serial, mode="system", accepted=True, output=output)
 
     async def get_power_state(self, serial: str) -> PowerState:
         result = await self._backend.shell(serial, "dumpsys power")

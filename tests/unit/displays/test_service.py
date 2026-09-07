@@ -13,9 +13,22 @@ from adb_automation_mcp.errors import (
     BackendError,
     DeviceNotFoundError,
     DisplayInfoUnavailableError,
+    InvalidArgumentError,
     PermissionDeniedError,
 )
 from adb_automation_mcp.modules.displays.service import DisplaysService
+
+
+def _size(stdout: str) -> FakeBackend:
+    return FakeBackend(
+        wm_size_result=CommandResult(stdout=stdout, stderr="", exit_code=0, duration_ms=30.0)
+    )
+
+
+def _density(stdout: str) -> FakeBackend:
+    return FakeBackend(
+        wm_density_result=CommandResult(stdout=stdout, stderr="", exit_code=0, duration_ms=30.0)
+    )
 
 
 def test_service_constructs_with_backend() -> None:
@@ -192,3 +205,191 @@ async def test_list_displays__unclassified_failure_raises_backend_error() -> Non
 async def test_list_displays__backend_unavailable_raises_adb_unavailable() -> None:
     with pytest.raises(AdbUnavailableError):
         await DisplaysService(FakeBackend(unavailable=True)).list_displays("emulator-5554")
+
+
+# --- get_display_size -------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_display_size__default_display_sends_wm_size_and_parses_physical() -> None:
+    captured: dict[str, str] = {}
+
+    class RecordingBackend(FakeBackend):
+        async def shell(
+            self, serial: str, command: str, timeout_s: float | None = None
+        ) -> CommandResult:
+            captured["command"] = command
+            return await super().shell(serial, command, timeout_s)
+
+    result = await DisplaysService(RecordingBackend()).get_display_size("emulator-5554")
+
+    assert captured["command"] == "wm size"
+    assert result.serial == "emulator-5554"
+    assert result.display_id is None
+    assert (result.physical_width, result.physical_height) == (1408, 792)
+    assert result.override_width is None and result.override_height is None
+    assert (result.effective_width, result.effective_height) == (1408, 792)
+
+
+@pytest.mark.asyncio
+async def test_get_display_size__display_id_maps_to_dash_d_flag() -> None:
+    captured: dict[str, str] = {}
+
+    class RecordingBackend(FakeBackend):
+        async def shell(
+            self, serial: str, command: str, timeout_s: float | None = None
+        ) -> CommandResult:
+            captured["command"] = command
+            return await super().shell(serial, command, timeout_s)
+
+    result = await DisplaysService(RecordingBackend()).get_display_size("emulator-5554", 2)
+
+    assert captured["command"] == "wm size -d 2"
+    assert result.display_id == 2
+
+
+@pytest.mark.asyncio
+async def test_get_display_size__override_line_is_parsed_and_wins_effective() -> None:
+    result = await DisplaysService(
+        _size("Physical size: 1408x792\nOverride size: 1080x720\n")
+    ).get_display_size("emulator-5554")
+
+    assert (result.physical_width, result.physical_height) == (1408, 792)
+    assert (result.override_width, result.override_height) == (1080, 720)
+    assert (result.effective_width, result.effective_height) == (1080, 720)
+
+
+@pytest.mark.asyncio
+async def test_get_display_size__negative_display_id_rejected_before_backend() -> None:
+    class ExplodingBackend(FakeBackend):
+        async def shell(
+            self, serial: str, command: str, timeout_s: float | None = None
+        ) -> CommandResult:
+            raise AssertionError("backend should not be reached")
+
+    with pytest.raises(InvalidArgumentError):
+        await DisplaysService(ExplodingBackend()).get_display_size("emulator-5554", -1)
+
+
+@pytest.mark.asyncio
+async def test_get_display_size__nonexistent_display_reports_zero_raises_unavailable() -> None:
+    with pytest.raises(DisplayInfoUnavailableError):
+        await DisplaysService(_size("Physical size: 0x0\n")).get_display_size("emulator-5554", 99)
+
+
+@pytest.mark.asyncio
+async def test_get_display_size__unrecognized_output_raises_unavailable() -> None:
+    with pytest.raises(DisplayInfoUnavailableError):
+        await DisplaysService(_size("wm: command not understood\n")).get_display_size(
+            "emulator-5554"
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_display_size__unknown_serial_raises_device_not_found() -> None:
+    backend = FakeBackend(
+        wm_size_result=CommandResult(
+            stdout="", stderr="adb: device 'bogus' not found\n", exit_code=1, duration_ms=5.0
+        )
+    )
+    with pytest.raises(DeviceNotFoundError):
+        await DisplaysService(backend).get_display_size("bogus")
+
+
+@pytest.mark.asyncio
+async def test_get_display_size__unclassified_failure_raises_backend_error() -> None:
+    backend = FakeBackend(
+        wm_size_result=CommandResult(
+            stdout="", stderr="something unexpected\n", exit_code=2, duration_ms=5.0
+        )
+    )
+    with pytest.raises(BackendError):
+        await DisplaysService(backend).get_display_size("emulator-5554")
+
+
+# --- get_display_density --------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_display_density__default_display_sends_wm_density_and_parses() -> None:
+    captured: dict[str, str] = {}
+
+    class RecordingBackend(FakeBackend):
+        async def shell(
+            self, serial: str, command: str, timeout_s: float | None = None
+        ) -> CommandResult:
+            captured["command"] = command
+            return await super().shell(serial, command, timeout_s)
+
+    result = await DisplaysService(RecordingBackend()).get_display_density("emulator-5554")
+
+    assert captured["command"] == "wm density"
+    assert result.physical_density == 160
+    assert result.override_density is None
+    assert result.effective_density == 160
+
+
+@pytest.mark.asyncio
+async def test_get_display_density__display_id_maps_to_dash_d_flag() -> None:
+    captured: dict[str, str] = {}
+
+    class RecordingBackend(FakeBackend):
+        async def shell(
+            self, serial: str, command: str, timeout_s: float | None = None
+        ) -> CommandResult:
+            captured["command"] = command
+            return await super().shell(serial, command, timeout_s)
+
+    await DisplaysService(RecordingBackend()).get_display_density("emulator-5554", 0)
+
+    assert captured["command"] == "wm density -d 0"
+
+
+@pytest.mark.asyncio
+async def test_get_display_density__override_line_parsed_and_wins_effective() -> None:
+    result = await DisplaysService(
+        _density("Physical density: 160\nOverride density: 240\n")
+    ).get_display_density("emulator-5554")
+
+    assert result.physical_density == 160
+    assert result.override_density == 240
+    assert result.effective_density == 240
+
+
+@pytest.mark.asyncio
+async def test_get_display_density__negative_display_id_rejected_before_backend() -> None:
+    class ExplodingBackend(FakeBackend):
+        async def shell(
+            self, serial: str, command: str, timeout_s: float | None = None
+        ) -> CommandResult:
+            raise AssertionError("backend should not be reached")
+
+    with pytest.raises(InvalidArgumentError):
+        await DisplaysService(ExplodingBackend()).get_display_density("emulator-5554", -5)
+
+
+@pytest.mark.asyncio
+async def test_get_display_density__nonexistent_display_reports_minus_one_raises_unavailable() -> (
+    None
+):
+    with pytest.raises(DisplayInfoUnavailableError):
+        await DisplaysService(_density("Physical density: -1\n")).get_display_density(
+            "emulator-5554", 99
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_display_density__unrecognized_output_raises_unavailable() -> None:
+    with pytest.raises(DisplayInfoUnavailableError):
+        await DisplaysService(_density("nothing useful here\n")).get_display_density("emulator-5554")
+
+
+@pytest.mark.asyncio
+async def test_get_display_density__unknown_serial_raises_device_not_found() -> None:
+    backend = FakeBackend(
+        wm_density_result=CommandResult(
+            stdout="", stderr="adb: device 'bogus' not found\n", exit_code=1, duration_ms=5.0
+        )
+    )
+    with pytest.raises(DeviceNotFoundError):
+        await DisplaysService(backend).get_display_density("bogus")

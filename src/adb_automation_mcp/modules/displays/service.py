@@ -1,5 +1,6 @@
 """Domain logic for the displays module: enumerating a device's logical
-displays from `adb shell dumpsys display`.
+displays from `adb shell dumpsys display`, plus reading one display's size
+and density from `adb shell wm size` / `adb shell wm density`.
 
 `dumpsys display` is hundreds of lines of unstable internal state; this
 module reads only two curated, long-stable markers and parses them in
@@ -13,8 +14,10 @@ Python (no shell `grep`/`awk`):
   display (a powered-off display may have no viewport).
 
 The display-state list is the row source; viewport data enriches each row
-with dimensions/density/type when present. Manipulating display state
-(size, density, rotation) isn't implemented here.
+with dimensions/density/type when present. `wm size` / `wm density` print
+a ``Physical ...`` line and, only when an override is in effect, an
+``Override ...`` line. Changing display state (setting size/density/
+rotation) isn't implemented here.
 """
 
 from __future__ import annotations
@@ -28,12 +31,22 @@ from adb_automation_mcp.errors import (
     BackendError,
     DeviceNotFoundError,
     DisplayInfoUnavailableError,
+    InvalidArgumentError,
     PermissionDeniedError,
 )
 
 _VIEWPORT_RE = re.compile(r"DisplayViewport\{(?P<body>[^}]*)\}")
 _DISPLAY_ID_RE = re.compile(r"^\s*Display Id=(?P<id>\d+)\s*$")
 _DISPLAY_STATE_RE = re.compile(r"^\s*Display State=(?P<state>\S+)\s*$")
+
+# `wm size` / `wm density` output lines. `wm` does not error on a
+# non-existent display id — it prints "Physical size: 0x0" / "Physical
+# density: -1" and exits 0 (verified live on a car AVD), which this module
+# treats as "no such display" and raises DISPLAY_INFO_UNAVAILABLE for.
+_PHYSICAL_SIZE_RE = re.compile(r"^\s*Physical size:\s*(?P<w>\d+)x(?P<h>\d+)\s*$", re.MULTILINE)
+_OVERRIDE_SIZE_RE = re.compile(r"^\s*Override size:\s*(?P<w>\d+)x(?P<h>\d+)\s*$", re.MULTILINE)
+_PHYSICAL_DENSITY_RE = re.compile(r"^\s*Physical density:\s*(?P<d>-?\d+)\s*$", re.MULTILINE)
+_OVERRIDE_DENSITY_RE = re.compile(r"^\s*Override density:\s*(?P<d>-?\d+)\s*$", re.MULTILINE)
 
 
 class DisplayInfo(BaseModel):
@@ -79,8 +92,58 @@ class DisplayList(BaseModel):
         return f"{n} display{'s' if n != 1 else ''} on {self.serial}: {ids}."
 
 
+class DisplaySize(BaseModel):
+    """One display's pixel dimensions (`adb shell wm size`).
+
+    physical_* is the panel's native resolution; override_* is set only
+    when a `wm size WxH` override is currently in effect (None otherwise).
+    effective_* is the resolution apps actually see — the override when one
+    is set, else the physical size.
+    """
+
+    serial: str
+    display_id: int | None
+    physical_width: int
+    physical_height: int
+    override_width: int | None
+    override_height: int | None
+    effective_width: int
+    effective_height: int
+
+    def summary(self) -> str:
+        where = "default display" if self.display_id is None else f"display {self.display_id}"
+        base = f"{where} on {self.serial}: {self.effective_width}x{self.effective_height}"
+        if self.override_width is not None:
+            return f"{base} (override; physical {self.physical_width}x{self.physical_height})."
+        return f"{base}."
+
+
+class DisplayDensity(BaseModel):
+    """One display's density in dpi (`adb shell wm density`).
+
+    physical_density is the panel's native density; override_density is set
+    only when a `wm density N` override is in effect (None otherwise).
+    effective_density is what apps see — the override when set, else physical.
+    """
+
+    serial: str
+    display_id: int | None
+    physical_density: int
+    override_density: int | None
+    effective_density: int
+
+    def summary(self) -> str:
+        where = "default display" if self.display_id is None else f"display {self.display_id}"
+        base = f"{where} on {self.serial}: {self.effective_density}dpi"
+        if self.override_density is not None:
+            return f"{base} (override; physical {self.physical_density}dpi)."
+        return f"{base}."
+
+
 class DisplaysService:
-    """Enumerates a connected device's logical displays."""
+    """Enumerates a connected device's logical displays and reads one
+    display's size/density.
+    """
 
     def __init__(self, backend: AdbBackend) -> None:
         self._backend = backend
@@ -96,6 +159,76 @@ class DisplaysService:
                 details={"serial": serial, "output_head": result.stdout[:400]},
             )
         return DisplayList(serial=serial, displays=displays)
+
+    async def get_display_size(self, serial: str, display_id: int | None = None) -> DisplaySize:
+        _validate_display_id(display_id)
+        command = "wm size" if display_id is None else f"wm size -d {display_id}"
+        result = await self._backend.shell(serial, command)
+        _raise_for_dumpsys_failure(serial, result)
+
+        physical = _PHYSICAL_SIZE_RE.search(result.stdout)
+        if physical is None:
+            raise DisplayInfoUnavailableError(
+                "wm size produced no recognizable 'Physical size:' line.",
+                details={"serial": serial, "display_id": display_id, "output": result.stdout[:200]},
+            )
+        pw, ph = int(physical.group("w")), int(physical.group("h"))
+        if pw == 0 or ph == 0:
+            raise DisplayInfoUnavailableError(
+                f"wm size reported {pw}x{ph} — display id {display_id} does not exist.",
+                details={"serial": serial, "display_id": display_id},
+            )
+        override = _OVERRIDE_SIZE_RE.search(result.stdout)
+        ow = int(override.group("w")) if override else None
+        oh = int(override.group("h")) if override else None
+        return DisplaySize(
+            serial=serial,
+            display_id=display_id,
+            physical_width=pw,
+            physical_height=ph,
+            override_width=ow,
+            override_height=oh,
+            effective_width=ow if ow is not None else pw,
+            effective_height=oh if oh is not None else ph,
+        )
+
+    async def get_display_density(
+        self, serial: str, display_id: int | None = None
+    ) -> DisplayDensity:
+        _validate_display_id(display_id)
+        command = "wm density" if display_id is None else f"wm density -d {display_id}"
+        result = await self._backend.shell(serial, command)
+        _raise_for_dumpsys_failure(serial, result)
+
+        physical = _PHYSICAL_DENSITY_RE.search(result.stdout)
+        if physical is None:
+            raise DisplayInfoUnavailableError(
+                "wm density produced no recognizable 'Physical density:' line.",
+                details={"serial": serial, "display_id": display_id, "output": result.stdout[:200]},
+            )
+        pd = int(physical.group("d"))
+        if pd < 0:
+            raise DisplayInfoUnavailableError(
+                f"wm density reported {pd} — display id {display_id} does not exist.",
+                details={"serial": serial, "display_id": display_id},
+            )
+        override = _OVERRIDE_DENSITY_RE.search(result.stdout)
+        od = int(override.group("d")) if override else None
+        return DisplayDensity(
+            serial=serial,
+            display_id=display_id,
+            physical_density=pd,
+            override_density=od,
+            effective_density=od if od is not None else pd,
+        )
+
+
+def _validate_display_id(display_id: int | None) -> None:
+    if display_id is not None and display_id < 0:
+        raise InvalidArgumentError(
+            "display_id must be a non-negative logical display id (see list_displays).",
+            details={"display_id": display_id},
+        )
 
 
 def _raise_for_dumpsys_failure(serial: str, result: CommandResult) -> None:

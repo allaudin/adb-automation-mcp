@@ -10,7 +10,7 @@ from typing import cast
 
 from fastmcp import Context
 
-from adb_automation_mcp.modules.power.service import PowerService, PowerState
+from adb_automation_mcp.modules.power.service import PowerService, PowerState, RebootResult
 from adb_automation_mcp.registry import category
 
 
@@ -64,3 +64,52 @@ async def get_power_state(ctx: Context, serial: str) -> PowerState:
     services = cast("dict[str, object]", ctx.lifespan_context["services"])
     power = cast(PowerService, services["power"])
     return await power.get_power_state(serial)
+
+
+@category("destructive")
+async def reboot_device(ctx: Context, serial: str) -> RebootResult:
+    """Reboot a device into its normal system image: `adb -s serial reboot`.
+
+    Categorized destructive (denied by default) because it interrupts
+    everything running on the device and takes it offline for the length of
+    a boot. adb returns the instant the request is delivered — well before
+    the device is back — so a successful result means only that the request
+    was accepted. The device will disappear from adb immediately; chain
+    wait_for_device_state(serial, state="device") to block until it's back
+    online before continuing automation. Rebooting into bootloader/recovery
+    isn't implemented here.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+
+    Returns:
+        The serial, mode ("system"), accepted (always true when this
+        returns without error — adb took the request), and adb's raw output
+        (normally empty).
+
+    Error handling:
+        An unknown serial raises DEVICE_NOT_FOUND; an unresponsive adb
+        binary raises ADB_UNAVAILABLE. Any other non-zero exit raises
+        BACKEND_ERROR. The device going offline right after this call is
+        expected and is not reported as an error.
+
+    Example:
+        Called with serial="emulator-5554". A typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "Reboot request accepted for emulator-5554; it will drop off adb until it finishes booting.",
+          "data": {
+            "serial": "emulator-5554",
+            "mode": "system",
+            "accepted": true,
+            "output": ""
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    power = cast(PowerService, services["power"])
+    return await power.reboot_device(serial)

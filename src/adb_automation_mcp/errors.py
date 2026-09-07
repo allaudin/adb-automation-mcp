@@ -256,6 +256,18 @@ class PowerStateUnavailableError(AdbError):
     code = "POWER_STATE_UNAVAILABLE"
 
 
+class ProcessMemoryUnavailableError(AdbError):
+    """`dumpsys meminfo` ran and the target process exists, but the output
+    carried none of the markers this tool reads (no "MEMINFO in pid" header
+    and no "TOTAL PSS" / "App Summary" section) — meminfo's format drifted
+    across Android versions, or the output was truncated/unrecognizable, so
+    no snapshot could be built. Distinct from PACKAGE_NOT_RUNNING, where the
+    process simply isn't running.
+    """
+
+    code = "PROCESS_MEMORY_UNAVAILABLE"
+
+
 class NetworkToolUnavailableError(AdbError):
     """The `ip` command used to enumerate network interfaces isn't
     available on this device (e.g. "ip: not found") — a tool/environment

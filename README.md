@@ -84,7 +84,7 @@ uv run mkdocs build --strict   # docs site
 
 ## Tools
 
-**76 tools.** Full signatures, docstrings, and worked examples are in the
+**81 tools.** Full signatures, docstrings, and worked examples are in the
 [tool reference](https://allaudin.github.io/adb-automation-mcp/reference/diagnostics/).
 Tools marked † are `destructive` — not registered unless
 `ADB_AUTOMATION_ALLOW_DESTRUCTIVE=1`.
@@ -108,8 +108,8 @@ Tools marked † are `destructive` — not registered unless
 | `packages` (7) | `list_packages`, `install_apk`, `uninstall_package`†, `install_existing_for_user`, `get_package_path`, `get_package_info`, `set_package_enabled_state` |
 | `permissions` (3) | `grant_permission`, `revoke_permission`, `get_package_permissions` |
 | `port_forwarding` (6) | `create_forward`, `list_forwards`, `remove_forward`, `create_reverse`, `list_reverses`, `remove_reverse` |
-| `power` (2) | `get_power_state`, `reboot_device`† |
-| `processes` (1) | `force_stop_app` |
+| `power` (3) | `get_power_state`, `reboot_device`†, `wake_device` |
+| `processes` (5) | `force_stop_app`, `kill_background_processes`, `list_processes`, `get_process_id`, `get_process_memory` |
 | `screen` (2) | `take_screenshot`, `record_screen` |
 | `settings` (2) | `get_setting`, `set_setting` |
 | `system_properties` (4) | `get_property`, `list_properties`, `get_property_metadata`, `set_property` |

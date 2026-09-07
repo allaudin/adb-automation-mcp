@@ -1,9 +1,10 @@
 """Domain logic for the power module: the device's current high-level power
-state (`adb shell dumpsys power`), plus rebooting it (`adb reboot`).
+state (`adb shell dumpsys power`), rebooting it (`adb reboot`), and waking a
+sleeping screen (`adb shell input keyevent WAKEUP`).
 `dumpsys power` output is large and carries many internal, unstable
 implementation details — this deliberately extracts only the two fields
 stable enough to trust: wakefulness and (when present) interactive state.
-Shutdown, sleep, and wake control aren't implemented yet.
+Shutdown and sleep control aren't implemented yet.
 """
 
 from __future__ import annotations
@@ -78,11 +79,37 @@ class RebootResult(BaseModel):
         )
 
 
+class WakeResult(BaseModel):
+    """Outcome of waking a device (`adb shell input keyevent WAKEUP`).
+
+    WAKEUP is idempotent: injecting it on an already-awake device is a
+    harmless no-op, so a success here means "the device is awake now",
+    not "the device was asleep and this changed that". The keyevent itself
+    produces no output — success is read from the command's exit code. Chain
+    get_power_state(serial) to confirm wakefulness=="Awake" if an
+    independent check is needed.
+    """
+
+    serial: str
+    keycode: str
+    accepted: bool
+
+    def summary(self) -> str:
+        return f"Sent {self.keycode} to {self.serial}; the screen should be awake."
+
+
 class PowerService:
-    """Reads the device's current high-level power state and reboots it."""
+    """Reads the device's current high-level power state, reboots it, and
+    wakes its screen.
+    """
 
     def __init__(self, backend: AdbBackend) -> None:
         self._backend = backend
+
+    async def wake_device(self, serial: str) -> WakeResult:
+        result = await self._backend.shell(serial, "input keyevent WAKEUP")
+        _raise_for_shell_failure(serial, result)
+        return WakeResult(serial=serial, keycode="WAKEUP", accepted=True)
 
     async def reboot_device(self, serial: str) -> RebootResult:
         result = await self._backend.reboot(serial)
@@ -99,7 +126,7 @@ class PowerService:
 
     async def get_power_state(self, serial: str) -> PowerState:
         result = await self._backend.shell(serial, "dumpsys power")
-        _raise_for_dumpsys_failure(serial, result)
+        _raise_for_shell_failure(serial, result)
 
         wakefulness_match = _WAKEFULNESS_RE.search(result.stdout)
         if wakefulness_match is None:
@@ -115,7 +142,7 @@ class PowerService:
         )
 
 
-def _raise_for_dumpsys_failure(serial: str, result: CommandResult) -> None:
+def _raise_for_shell_failure(serial: str, result: CommandResult) -> None:
     if result.exit_code == 0:
         return
     message = (result.stderr or result.stdout).strip() or "adb shell command exited non-zero."

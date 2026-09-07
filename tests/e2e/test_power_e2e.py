@@ -126,3 +126,45 @@ async def test_reboot_device_tool_unknown_serial_returns_device_not_found_error(
     assert result.data.status == "error"
     assert result.data.error is not None
     assert result.data.error.code == "DEVICE_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_wake_device_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("wake_device", {"serial": "emulator-5554"})
+
+    assert result.data.status == "success"
+    assert result.data.data.serial == "emulator-5554"
+    assert result.data.data.keycode == "WAKEUP"
+    assert result.data.data.accepted is True
+
+
+@pytest.mark.asyncio
+async def test_wake_device_tool_is_registered_without_destructive_gate() -> None:
+    # wake_device is `write`, not `destructive` — it must be exposed by default.
+    mcp = _build_test_server(FakeBackend(), allow_destructive=False)
+
+    async with Client(mcp) as client:
+        tools = await client.list_tools()
+
+    assert "wake_device" in {tool.name for tool in tools}
+
+
+@pytest.mark.asyncio
+async def test_wake_device_tool_adb_failure_returns_device_not_found_error() -> None:
+    mcp = _build_test_server(
+        FakeBackend(
+            input_keyevent_result=CommandResult(
+                stdout="", stderr="adb: device 'bogus' not found\n", exit_code=1, duration_ms=10.0
+            )
+        )
+    )
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("wake_device", {"serial": "bogus"})
+
+    assert result.data.status == "error"
+    assert result.data.error is not None
+    assert result.data.error.code == "DEVICE_NOT_FOUND"

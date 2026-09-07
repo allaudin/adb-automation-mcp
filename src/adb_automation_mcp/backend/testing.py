@@ -124,6 +124,10 @@ class FakeBackend:
         stop_service_result: CommandResult | None = None,
         dumpsys_activity_services_result: CommandResult | None = None,
         force_stop_result: CommandResult | None = None,
+        am_kill_result: CommandResult | None = None,
+        ps_result: CommandResult | None = None,
+        pidof_names_result: CommandResult | None = None,
+        dumpsys_meminfo_result: CommandResult | None = None,
         pull_result: CommandResult | None = None,
         forward_result: CommandResult | None = None,
         forward_list_result: CommandResult | None = None,
@@ -688,6 +692,70 @@ class FakeBackend:
         self._force_stop_result = force_stop_result or CommandResult(
             stdout="", stderr="", exit_code=0, duration_ms=90.0
         )
+        # `adb shell am kill [--user N] PACKAGE` — ActivityManagerShellCommand's
+        # runKill(): no stdout at all, exit 0, whether or not any killable
+        # background process actually existed (verified live on a car AVD, incl.
+        # for a package that isn't installed). Override to simulate a failure.
+        self._am_kill_result = am_kill_result or CommandResult(
+            stdout="", stderr="", exit_code=0, duration_ms=70.0
+        )
+        # `adb shell ps -A -o PID,PPID,USER,RSS,NAME` — toybox `ps`: a fixed
+        # header line then one space-padded, column-aligned row per process.
+        # Rows captured live from a car AVD (init, a kernel worker thread with a
+        # bracketed name and RSS 0, and a running app process). Override to
+        # exercise filter / malformed-output paths.
+        self._ps_result = ps_result or CommandResult(
+            stdout=(
+                "  PID  PPID USER            RSS NAME\n"
+                "    1     0 root          14776 init\n"
+                "    2     0 root              0 [kthreadd]\n"
+                " 1224   432 u0_a141      260040 com.android.systemui\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=110.0,
+        )
+        # `adb shell pidof NAME` (no `-s`) — space-separated PID list on one
+        # line, exit 0, when at least one process matches; empty stdout and
+        # exit 1 when none do (a valid "not running" outcome, not an error).
+        # Verified live on a car AVD. Override to simulate the multi-PID or
+        # not-running cases.
+        self._pidof_names_result = pidof_names_result or CommandResult(
+            stdout="1224\n", stderr="", exit_code=0, duration_ms=25.0
+        )
+        # `adb shell dumpsys meminfo -s PACKAGE_OR_PID` — trimmed to the
+        # markers ProcessesService.get_process_memory reads: the "** MEMINFO in
+        # pid N [name] **" header and the "App Summary" Pss/Rss table with its
+        # "TOTAL PSS: / TOTAL RSS: / TOTAL SWAP (KB):" line. Field shapes
+        # transcribed from live car-AVD output for com.android.systemui. A
+        # target with no running process prints "No process found for: <target>"
+        # and still exits 0 — see get_process_memory for how that's classified.
+        self._dumpsys_meminfo_result = dumpsys_meminfo_result or CommandResult(
+            stdout=(
+                "Applications Memory Usage (in Kilobytes):\n"
+                "Uptime: 539397 Realtime: 539397\n"
+                "\n"
+                "** MEMINFO in pid 1224 [com.android.systemui] **\n"
+                "\n"
+                " App Summary\n"
+                "                       Pss(KB)                        Rss(KB)\n"
+                "                        ------                         ------\n"
+                "           Java Heap:    28048                          59716\n"
+                "         Native Heap:    21120                          24912\n"
+                "                Code:    37168                         172148\n"
+                "               Stack:     1632                           1640\n"
+                "            Graphics:        0                              0\n"
+                "       Private Other:     4008\n"
+                "              System:    13345\n"
+                "             Unknown:                                   10000\n"
+                "\n"
+                "           TOTAL PSS:   105321            TOTAL RSS:   268416"
+                "      TOTAL SWAP (KB):        0\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=210.0,
+        )
         # None (the default) means "build a realistic success message from
         # whatever remote_path is actually pulled" — see pull() below, same
         # convention as connect_result. Real, long-stable `adb pull` wording.
@@ -1114,6 +1182,10 @@ class FakeBackend:
             return self._get_log_buffer_size_result
         if command.startswith("pidof -s "):
             return self._pidof_result
+        if command.startswith("pidof "):
+            return self._pidof_names_result
+        if command.startswith("ps -A"):
+            return self._ps_result
         if command == "getprop":
             return self._list_properties_result
         if command.startswith("getprop -Z "):
@@ -1177,6 +1249,8 @@ class FakeBackend:
             return self._start_activity_result
         if command.startswith("am force-stop "):
             return self._force_stop_result
+        if command.startswith("am kill "):
+            return self._am_kill_result
         if command.startswith("input ") and " tap " in command:
             return self._input_tap_result
         if command.startswith("input ") and " swipe " in command:
@@ -1218,6 +1292,8 @@ class FakeBackend:
             return self._wm_size_result
         if command.startswith("wm density"):
             return self._wm_density_result
+        if command.startswith("dumpsys meminfo "):
+            return self._dumpsys_meminfo_result
         if command == "dumpsys power":
             return self._dumpsys_power_result
         if command == "dumpsys connectivity":

@@ -147,6 +147,11 @@ class FakeBackend:
         am_profile_stop_result: CommandResult | None = None,
         trace_ipc_start_result: CommandResult | None = None,
         trace_ipc_stop_result: CommandResult | None = None,
+        debuggerd_backtrace_result: CommandResult | None = None,
+        debuggerd_tombstone_result: CommandResult | None = None,
+        set_watch_heap_result: CommandResult | None = None,
+        clear_watch_heap_result: CommandResult | None = None,
+        smaps_rollup_result: CommandResult | None = None,
         gfxinfo_framestats_result: CommandResult | None = None,
         gfxinfo_reset_result: CommandResult | None = None,
         perfetto_result: CommandResult | None = None,
@@ -1179,6 +1184,106 @@ class FakeBackend:
             exit_code=0,
             duration_ms=60.0,
         )
+        # `adb shell debuggerd -b <pid>` — the backtrace-only dump. Header
+        # ("----- pid N at ... -----", "Cmd line:", "ABI:", "Ppid:") then a
+        # `"<thread>" sysTid=N` block per thread with `#NN pc ...` frames.
+        # Transcribed/trimmed from live car-AVD output (needs root there;
+        # non-root prints "debuggerd: root is required", exit 0 — override to
+        # simulate).
+        self._debuggerd_backtrace_result = debuggerd_backtrace_result or CommandResult(
+            stdout=(
+                "\n----- pid 1224 at 2026-09-07 13:49:29.621531998+0200 -----\n"
+                "Cmd line: com.android.systemui\n"
+                "ABI: 'x86_64'\n"
+                "Ppid: 432\n"
+                "\n"
+                '"ndroid.systemui" sysTid=1224\n'
+                "    #00 pc 000000000005f04a  /apex/com.android.runtime/lib64/bionic/libc.so "
+                "(__epoll_pwait+10) (BuildId: e49da57dea49af4b7e68e406ebbe3a31)\n"
+                "    #01 pc 000000000001ba2f  /system/lib64/libutils.so "
+                "(android::Looper::pollOnce(int, int*, int*, void**)+335)\n"
+                "    #02 pc 00000000002075d6  /system/lib64/libandroid_runtime.so\n"
+                "\n"
+                '"Binder:1224_1" sysTid=1289\n'
+                "    #00 pc 000000000005e2b1  /apex/com.android.runtime/lib64/bionic/libc.so "
+                "(__ioctl+9)\n"
+                "    #01 pc 0000000000079b6d  /system/lib64/libbinder.so\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=900.0,
+        )
+        # `adb shell debuggerd <pid>` — the full tombstone dump on stdout: the
+        # "*** ***" banner, "Build fingerprint:", "ABI:", "Timestamp:",
+        # "Cmdline:", "pid: N, ppid: N, tid: N, name: ...", "uid:", the
+        # "signal ..." line, registers, "N total frames", "backtrace:" with
+        # `#NN pc ...` frames, then a "tombstone_XX.pb" reference. Transcribed
+        # from live car-AVD output (root-only there).
+        self._debuggerd_tombstone_result = debuggerd_tombstone_result or CommandResult(
+            stdout=(
+                "*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***\n"
+                "Build fingerprint: 'Android/sdk_car_x86_64/emulator_car64_x86_64:Baklava/"
+                "CP2A.260605.016/eng.allaud:userdebug/test-keys'\n"
+                "ABI: 'x86_64'\n"
+                "Timestamp: 2026-09-07 13:49:42.394429248+0200\n"
+                "Process uptime: 0s\n"
+                "Cmdline: com.android.systemui\n"
+                "pid: 1224, ppid: 432, tid: 1224, name: ndroid.systemui  "
+                ">>> com.android.systemui <<<\n"
+                "uid: 10141\n"
+                "signal 35 (<debuggerd signal>), code -1 (SI_QUEUE from pid 7338, uid 0), "
+                "fault addr --------\n"
+                "    rax fffffffffffffffc  rbx 0000000000000050\n"
+                "\n"
+                "24 total frames\n"
+                "backtrace:\n"
+                "      #00 pc 000000000005f04a  /apex/com.android.runtime/lib64/bionic/libc.so "
+                "(__epoll_pwait+10)\n"
+                "      #01 pc 000000000001ba2f  /system/lib64/libutils.so\n"
+                "\n"
+                "Note: To display stack pointer information, use the pbtombstone tool:\n"
+                "        pbtombstone --display-sp tombstone_27.pb\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=1200.0,
+        )
+        # `adb shell am set-watch-heap <pkg> <bytes>` / `am clear-watch-heap
+        # <pkg>` — both silent, exit 0 (verified live; neither validates the
+        # package). NOTE: this build's clear-watch-heap requires the <pkg> arg.
+        self._set_watch_heap_result = set_watch_heap_result or CommandResult(
+            stdout="", stderr="", exit_code=0, duration_ms=40.0
+        )
+        self._clear_watch_heap_result = clear_watch_heap_result or CommandResult(
+            stdout="", stderr="", exit_code=0, duration_ms=40.0
+        )
+        # `adb shell cat /proc/<pid>/smaps_rollup` — the kernel's per-process
+        # rollup: one "[rollup]" map line then `Key:  N kB` aggregates.
+        # Captured live from a car AVD (root-only there; as shell it prints
+        # "cat: ...: Permission denied", exit 0 — override to simulate).
+        self._smaps_rollup_result = smaps_rollup_result or CommandResult(
+            stdout=(
+                "02000000-7ffc3497a000 ---p 00000000 00:00 0                    [rollup]\n"
+                "Rss:              290988 kB\n"
+                "Pss:              127651 kB\n"
+                "Pss_Dirty:         71000 kB\n"
+                "Pss_Anon:          69990 kB\n"
+                "Pss_File:          56651 kB\n"
+                "Pss_Shmem:          1010 kB\n"
+                "Shared_Clean:     143216 kB\n"
+                "Shared_Dirty:      38208 kB\n"
+                "Private_Clean:     40312 kB\n"
+                "Private_Dirty:     69252 kB\n"
+                "Referenced:       280996 kB\n"
+                "Anonymous:        104420 kB\n"
+                "Swap:                  8 kB\n"
+                "SwapPss:               0 kB\n"
+                "Locked:                0 kB\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=25.0,
+        )
         # `adb shell dumpsys gfxinfo <package> framestats` — the per-process
         # summary block get_frame_stats parses (totals, jank, percentiles, the
         # "Number <x>:" counters, HISTOGRAM). Transcribed/trimmed from live
@@ -1822,6 +1927,16 @@ class FakeBackend:
             return self._trace_ipc_start_result
         if command.startswith("am trace-ipc stop"):
             return self._trace_ipc_stop_result
+        if command.startswith("debuggerd -b "):
+            return self._debuggerd_backtrace_result
+        if command.startswith("debuggerd "):
+            return self._debuggerd_tombstone_result
+        if command.startswith("am set-watch-heap "):
+            return self._set_watch_heap_result
+        if command.startswith("am clear-watch-heap"):
+            return self._clear_watch_heap_result
+        if command.startswith("cat /proc/") and command.endswith("/smaps_rollup"):
+            return self._smaps_rollup_result
         if command.startswith("dumpsys gfxinfo ") and command.endswith(" reset"):
             return self._gfxinfo_reset_result
         if command.startswith("dumpsys gfxinfo "):

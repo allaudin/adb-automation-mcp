@@ -12,10 +12,13 @@ from adb_automation_mcp.backend.protocol import AdbBackend
 from adb_automation_mcp.modules.memory.service import MemoryService
 from adb_automation_mcp.modules.memory.tools import (
     capture_heap_dump,
+    clear_heap_watch,
     get_app_memory_details,
     get_app_memory_summary,
     get_memory_history,
+    get_memory_maps,
     get_system_memory_summary,
+    set_heap_watch,
 )
 from adb_automation_mcp.registry import ModuleManifest
 
@@ -39,6 +42,9 @@ MODULE = ModuleManifest(
         get_system_memory_summary,
         get_memory_history,
         capture_heap_dump,
+        set_heap_watch,
+        clear_heap_watch,
+        get_memory_maps,
     ],
     resources=[],
 )

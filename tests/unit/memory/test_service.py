@@ -422,3 +422,123 @@ async def test_get_app_memory_summary__unclassified_backend_error() -> None:
     backend = FakeBackend(dumpsys_meminfo_result=_cr(stderr="weird failure\n", exit_code=2))
     with pytest.raises(BackendError):
         await MemoryService(backend).get_app_memory_summary("emulator-5554", "com.x")
+
+
+# --- set_heap_watch / clear_heap_watch / get_memory_maps ------------
+
+
+@pytest.mark.asyncio
+async def test_set_heap_watch__command_and_confirm() -> None:
+    backend = RecordingBackend()
+
+    result = await MemoryService(backend).set_heap_watch(
+        "emulator-5554", "com.example.app", 268435456
+    )
+
+    assert backend.commands == ["am set-watch-heap com.example.app 268435456"]
+    assert result.threshold_bytes == 268435456
+    assert result.watching is True
+
+
+@pytest.mark.asyncio
+async def test_set_heap_watch__non_positive_threshold_rejected() -> None:
+    class Exploding(FakeBackend):
+        async def shell(self, serial: str, command: str, timeout_s: float | None = None) -> CommandResult:
+            raise AssertionError("backend should not be reached")
+
+    with pytest.raises(InvalidArgumentError):
+        await MemoryService(Exploding()).set_heap_watch("emulator-5554", "com.x", 0)
+    with pytest.raises(InvalidArgumentError):
+        await MemoryService(Exploding()).set_heap_watch("emulator-5554", "com.x", -5)
+
+
+@pytest.mark.asyncio
+async def test_set_heap_watch__blank_package_rejected() -> None:
+    class Exploding(FakeBackend):
+        async def shell(self, serial: str, command: str, timeout_s: float | None = None) -> CommandResult:
+            raise AssertionError("backend should not be reached")
+
+    with pytest.raises(InvalidArgumentError):
+        await MemoryService(Exploding()).set_heap_watch("emulator-5554", "  ", 1024)
+
+
+@pytest.mark.asyncio
+async def test_set_heap_watch__unsupported_command_raises_backend_error() -> None:
+    backend = FakeBackend(
+        set_watch_heap_result=_cr(stdout="Error: unknown command 'set-watch-heap'\n", exit_code=255)
+    )
+    with pytest.raises(BackendError):
+        await MemoryService(backend).set_heap_watch("emulator-5554", "com.x", 1024)
+
+
+@pytest.mark.asyncio
+async def test_clear_heap_watch__command_and_idempotent() -> None:
+    backend = RecordingBackend()
+
+    result = await MemoryService(backend).clear_heap_watch("emulator-5554", "com.example.app")
+
+    assert backend.commands == ["am clear-watch-heap com.example.app"]
+    assert result.cleared is True
+
+
+@pytest.mark.asyncio
+async def test_clear_heap_watch__unknown_serial() -> None:
+    backend = FakeBackend(
+        clear_watch_heap_result=_cr(stderr="adb: device 'bogus' not found\n", exit_code=1)
+    )
+    with pytest.raises(DeviceNotFoundError):
+        await MemoryService(backend).clear_heap_watch("bogus", "com.x")
+
+
+@pytest.mark.asyncio
+async def test_get_memory_maps__command_and_parse() -> None:
+    backend = RecordingBackend()
+
+    result = await MemoryService(backend).get_memory_maps("emulator-5554", 1224)
+
+    assert backend.commands == ["cat /proc/1224/smaps_rollup"]
+    assert result.pid == 1224
+    assert result.rss_kb == 290988
+    assert result.pss_kb == 127651
+    assert result.pss_dirty_kb == 71000
+    assert result.shared_clean_kb == 143216
+    assert result.private_dirty_kb == 69252
+    assert result.swap_kb == 8
+    assert result.swap_pss_kb == 0
+
+
+@pytest.mark.asyncio
+async def test_get_memory_maps__non_positive_pid_rejected() -> None:
+    class Exploding(FakeBackend):
+        async def shell(self, serial: str, command: str, timeout_s: float | None = None) -> CommandResult:
+            raise AssertionError("backend should not be reached")
+
+    with pytest.raises(InvalidArgumentError):
+        await MemoryService(Exploding()).get_memory_maps("emulator-5554", 0)
+
+
+@pytest.mark.asyncio
+async def test_get_memory_maps__permission_denied() -> None:
+    backend = FakeBackend(
+        smaps_rollup_result=_cr(stdout="cat: /proc/1/smaps_rollup: Permission denied\n")
+    )
+    with pytest.raises(PermissionDeniedError):
+        await MemoryService(backend).get_memory_maps("emulator-5554", 1)
+
+
+@pytest.mark.asyncio
+async def test_get_memory_maps__process_gone_raises_remote_file_not_found() -> None:
+    from adb_automation_mcp.errors import RemoteFileNotFoundError
+
+    backend = FakeBackend(
+        smaps_rollup_result=_cr(stdout="cat: /proc/99999/smaps_rollup: No such file or directory\n")
+    )
+    with pytest.raises(RemoteFileNotFoundError):
+        await MemoryService(backend).get_memory_maps("emulator-5554", 99999)
+
+
+@pytest.mark.asyncio
+async def test_get_memory_maps__malformed_output_raises_memory_info_unavailable() -> None:
+    backend = FakeBackend(smaps_rollup_result=_cr(stdout="not smaps at all\n"))
+    with pytest.raises(MemoryInfoUnavailableError):
+        await MemoryService(backend).get_memory_maps("emulator-5554", 1224)

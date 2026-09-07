@@ -4,13 +4,17 @@
   exit-info <package>`), parsed into typed `ApplicationExitInfo` records;
 - setting / clearing ActivityManager's debug app (`adb shell am
   set-debug-app` / `am clear-debug-app`);
-- listing processes that currently expose a JDWP transport (`adb jdwp`).
+- listing processes that currently expose a JDWP transport (`adb jdwp`);
+- capturing a native backtrace (`adb shell debuggerd -b <pid>`) or a full
+  native tombstone (`adb shell debuggerd <pid>`) for a running process.
 """
 
 from __future__ import annotations
 
 import re
 import shlex
+from contextlib import suppress
+from pathlib import Path
 
 from pydantic import BaseModel
 
@@ -20,7 +24,20 @@ from adb_automation_mcp.errors import (
     DeviceNotFoundError,
     InvalidArgumentError,
     PermissionDeniedError,
+    PolicyViolationError,
 )
+
+_TOMBSTONE_SUBDIR = "tombstones"
+_TRACE_CAP = 40_000
+_DEBUGGERD_ROOT_MARKER = "root is required"
+_BT_PID_RE = re.compile(r"^-{3,}\s*pid\s+(?P<pid>\d+)\s+at\b", re.MULTILINE)
+_BT_CMDLINE_RE = re.compile(r"^Cmd ?line:\s*(?P<v>.+?)\s*$", re.MULTILINE)
+_BT_ABI_RE = re.compile(r"^ABI:\s*'?(?P<v>[^'\n]+)'?\s*$", re.MULTILINE)
+_BT_THREAD_RE = re.compile(r'^"(?P<name>[^"]*)"\s+sysTid=(?P<tid>\d+)', re.MULTILINE)
+_FRAME_RE = re.compile(r"^\s*#\d+\s+pc\s", re.MULTILINE)
+_TS_SIGNAL_RE = re.compile(r"^signal\s+(?P<v>.+?)\s*$", re.MULTILINE)
+_TS_FRAMES_RE = re.compile(r"^(?P<n>\d+)\s+total frames\s*$", re.MULTILINE)
+_TS_PB_RE = re.compile(r"(tombstone_\d+\.pb)")
 
 _BLOCK_SPLIT_RE = re.compile(r"ApplicationExitInfo #\d+:")
 _TIMESTAMP_RE = re.compile(r"timestamp=(?P<v>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+)")
@@ -147,11 +164,139 @@ class JdwpProcessList(BaseModel):
         return f"{self.count} JDWP-debuggable process(es) on {self.serial}: {self.pids}."
 
 
-class DebuggingService:
-    """Process-exit history, debug-app config, and JDWP listing for a device."""
+class NativeThread(BaseModel):
+    """One thread in a native backtrace: its name, kernel tid, and how many
+    stack frames were captured.
+    """
 
-    def __init__(self, backend: AdbBackend) -> None:
+    name: str
+    sys_tid: int
+    frame_count: int
+
+
+class NativeBacktrace(BaseModel):
+    """Native thread backtraces for a running process (`adb shell debuggerd
+    -b <pid>`).
+
+    process_name / abi come from the dump header. threads lists each
+    thread's name / tid / frame count. text is the full backtrace dump,
+    capped in length. Privileged on production builds — non-root devices
+    reject this.
+    """
+
+    serial: str
+    pid: int
+    process_name: str | None
+    abi: str | None
+    thread_count: int
+    threads: list[NativeThread]
+    text: str
+
+
+class NativeTombstone(BaseModel):
+    """A full native tombstone for a process (`adb shell debuggerd <pid>`),
+    saved to the host.
+
+    local_path is where the tombstone text was written on this server's
+    host. process_name / abi / signal come from the dump header;
+    frame_count is the "N total frames" value; device_tombstone_ref is the
+    `tombstone_NN.pb` filename the dump references on the device (None if
+    not present). Only ever returned on success.
+    """
+
+    serial: str
+    pid: int
+    process_name: str | None
+    abi: str | None
+    signal: str | None
+    frame_count: int | None
+    device_tombstone_ref: str | None
+    local_path: str
+    size_bytes: int | None
+    success: bool
+
+    def summary(self) -> str:
+        return f"Saved native tombstone for pid {self.pid} on {self.serial} to {self.local_path}."
+
+
+class DebuggingService:
+    """Process-exit history, debug-app config, JDWP listing, and native
+    backtrace / tombstone capture for a device.
+    """
+
+    def __init__(self, backend: AdbBackend, local_root: Path | None = None) -> None:
         self._backend = backend
+        self._local_root = local_root.resolve() if local_root is not None else None
+
+    def _resolve_local_path(self, rel: str) -> Path:
+        if self._local_root is None:
+            raise PolicyViolationError(
+                "No local_root configured for this server — capture_native_tombstone "
+                "cannot write to the host. Set ADB_AUTOMATION_LOCAL_ROOT.",
+                details={"local_path": rel},
+            )
+        resolved = (self._local_root / rel).resolve()
+        if not resolved.is_relative_to(self._local_root):
+            raise PolicyViolationError(
+                f"local_path '{rel}' resolves outside the configured local_root.",
+                details={"local_path": rel, "local_root": str(self._local_root)},
+            )
+        return resolved
+
+    async def capture_native_backtrace(self, serial: str, pid: int) -> NativeBacktrace:
+        if pid <= 0:
+            raise InvalidArgumentError(
+                "pid must be a positive integer.", details={"serial": serial, "pid": pid}
+            )
+        result = await self._backend.shell(serial, f"debuggerd -b {pid}", timeout_s=60.0)
+        _raise_for_debuggerd_failure(serial, pid, result)
+        text = result.stdout
+        cmdline = _BT_CMDLINE_RE.search(text)
+        abi = _BT_ABI_RE.search(text)
+        threads = _parse_native_threads(text)
+        return NativeBacktrace(
+            serial=serial,
+            pid=pid,
+            process_name=cmdline.group("v") if cmdline else None,
+            abi=abi.group("v") if abi else None,
+            thread_count=len(threads),
+            threads=threads,
+            text=_cap(text),
+        )
+
+    async def capture_native_tombstone(
+        self, serial: str, pid: int, local_path: str
+    ) -> NativeTombstone:
+        if pid <= 0:
+            raise InvalidArgumentError(
+                "pid must be a positive integer.", details={"serial": serial, "pid": pid}
+            )
+        target = self._resolve_local_path(f"{_TOMBSTONE_SUBDIR}/{local_path}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        result = await self._backend.shell(serial, f"debuggerd {pid}", timeout_s=120.0)
+        _raise_for_debuggerd_failure(serial, pid, result)
+        text = result.stdout
+        with suppress(OSError):
+            target.write_text(text)
+
+        cmdline = _BT_CMDLINE_RE.search(text)
+        abi = _BT_ABI_RE.search(text)
+        signal = _TS_SIGNAL_RE.search(text)
+        frames = _TS_FRAMES_RE.search(text)
+        pb = _TS_PB_RE.search(text)
+        return NativeTombstone(
+            serial=serial,
+            pid=pid,
+            process_name=cmdline.group("v") if cmdline else None,
+            abi=abi.group("v") if abi else None,
+            signal=signal.group("v") if signal else None,
+            frame_count=int(frames.group("n")) if frames else None,
+            device_tombstone_ref=pb.group(1) if pb else None,
+            local_path=str(target),
+            size_bytes=target.stat().st_size if target.is_file() else None,
+            success=True,
+        )
 
     async def set_debug_app(
         self,
@@ -211,6 +356,49 @@ class DebuggingService:
         records = _parse_exit_records(result.stdout)
         return ProcessExitHistory(
             serial=serial, package=package, count=len(records), records=records
+        )
+
+
+def _cap(text: str) -> str:
+    return text if len(text) <= _TRACE_CAP else text[:_TRACE_CAP] + "\n...[output truncated]"
+
+
+def _parse_native_threads(text: str) -> list[NativeThread]:
+    matches = list(_BT_THREAD_RE.finditer(text))
+    threads: list[NativeThread] = []
+    for i, m in enumerate(matches):
+        block_end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        block = text[m.end() : block_end]
+        threads.append(
+            NativeThread(
+                name=m.group("name"),
+                sys_tid=int(m.group("tid")),
+                frame_count=len(_FRAME_RE.findall(block)),
+            )
+        )
+    return threads
+
+
+def _raise_for_debuggerd_failure(serial: str, pid: int, result: CommandResult) -> None:
+    combined = f"{result.stdout}\n{result.stderr}"
+    if _DEBUGGERD_ROOT_MARKER in combined:
+        raise PermissionDeniedError(
+            "debuggerd requires root on this build.", details={"serial": serial, "pid": pid}
+        )
+    if "SecurityException" in combined or "Operation not permitted" in combined:
+        raise PermissionDeniedError(
+            f"debuggerd was refused for pid {pid}.", details={"serial": serial, "pid": pid}
+        )
+    if result.exit_code != 0:
+        message = (result.stderr or result.stdout).strip() or "debuggerd exited non-zero."
+        if message.startswith("adb:") and "not found" in message:
+            raise DeviceNotFoundError(message, details={"serial": serial})
+        raise BackendError(message, details={"serial": serial, "pid": pid})
+    # exit 0 but no recognizable dump — usually a dead/nonexistent pid.
+    if "pc " not in result.stdout and "total frames" not in result.stdout:
+        raise BackendError(
+            f"debuggerd produced no backtrace for pid {pid} (process gone or invalid?).",
+            details={"serial": serial, "pid": pid, "output_head": result.stdout[:200]},
         )
 
 

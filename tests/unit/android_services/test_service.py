@@ -20,6 +20,7 @@ from adb_automation_mcp.errors import (
 from adb_automation_mcp.modules.android_services.service import (
     AndroidServicesService,
     StartForegroundServiceResult,
+    StopServiceResult,
 )
 
 
@@ -338,3 +339,210 @@ def test_start_foreground_service_result_summary() -> None:
         output="Starting service: Intent { cmp=com.x/.Y }\n",
     ).summary()
     assert s == "Started foreground service com.x/.Y on emulator-5554."
+
+
+# --- stop_service -----------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_stop_service__running_service_stopped_true() -> None:
+    backend = _ShellRecordingBackend()
+    service = AndroidServicesService(backend)
+
+    result = await service.stop_service("emulator-5554", "com.example.app/.MyService")
+
+    assert backend.last_shell_command == "am stop-service -n com.example.app/.MyService"
+    assert isinstance(result, StopServiceResult)
+    assert result.stopped is True
+    assert result.was_running is True
+
+
+@pytest.mark.asyncio
+async def test_stop_service__sends_user_id_flag() -> None:
+    backend = _ShellRecordingBackend()
+    service = AndroidServicesService(backend)
+
+    result = await service.stop_service(
+        "emulator-5554", "com.example.app/.MyService", user_id=10
+    )
+
+    assert backend.last_shell_command == "am stop-service -n com.example.app/.MyService --user 10"
+    assert result.user_id == 10
+
+
+@pytest.mark.asyncio
+async def test_stop_service__not_running_exit_255_is_stopped_false_not_error() -> None:
+    # Verified live on a car AVD: "was not running." comes with exit 255.
+    backend = FakeBackend(
+        stop_service_result=CommandResult(
+            stdout=(
+                "Stopping service: Intent { cmp=com.example.app/.MyService }\n"
+                "Service not stopped: was not running.\n"
+            ),
+            stderr="",
+            exit_code=255,
+            duration_ms=5.0,
+        )
+    )
+    service = AndroidServicesService(backend)
+
+    result = await service.stop_service("emulator-5554", "com.example.app/.MyService")
+
+    assert result.stopped is False
+    assert result.was_running is False
+
+
+@pytest.mark.asyncio
+async def test_stop_service__unknown_component_reports_was_not_running_not_error() -> None:
+    # `am stop-service` can't tell "no such component" from "not running".
+    backend = FakeBackend(
+        stop_service_result=CommandResult(
+            stdout=(
+                "Stopping service: Intent { cmp=com.example.nope/.NoService }\n"
+                "Service not stopped: was not running.\n"
+            ),
+            stderr="",
+            exit_code=255,
+            duration_ms=5.0,
+        )
+    )
+    service = AndroidServicesService(backend)
+
+    result = await service.stop_service("emulator-5554", "com.example.nope/.NoService")
+
+    assert result.stopped is False
+    assert result.was_running is False
+
+
+@pytest.mark.asyncio
+async def test_stop_service__empty_component_rejected_before_backend() -> None:
+    backend = _ShellRecordingBackend()
+    service = AndroidServicesService(backend)
+
+    with pytest.raises(InvalidArgumentError):
+        await service.stop_service("emulator-5554", "  ")
+
+    assert backend.last_shell_command is None
+
+
+@pytest.mark.asyncio
+async def test_stop_service__negative_user_id_rejected_before_backend() -> None:
+    backend = _ShellRecordingBackend()
+    service = AndroidServicesService(backend)
+
+    with pytest.raises(InvalidArgumentError):
+        await service.stop_service("emulator-5554", "com.example.app/.MyService", user_id=-1)
+
+    assert backend.last_shell_command is None
+
+
+@pytest.mark.asyncio
+async def test_stop_service__malformed_component_raises_component_not_found() -> None:
+    backend = FakeBackend(
+        stop_service_result=CommandResult(
+            stdout="",
+            stderr=(
+                "\nException occurred while executing 'stop-service':\n"
+                "java.lang.IllegalArgumentException: Bad component name: notacomponent\n"
+            ),
+            exit_code=0,
+            duration_ms=5.0,
+        )
+    )
+    service = AndroidServicesService(backend)
+
+    with pytest.raises(ComponentNotFoundError):
+        await service.stop_service("emulator-5554", "notacomponent")
+
+
+@pytest.mark.asyncio
+async def test_stop_service__unknown_serial_raises_device_not_found() -> None:
+    backend = FakeBackend(
+        stop_service_result=CommandResult(
+            stdout="", stderr="adb: device 'bogus' not found\n", exit_code=1, duration_ms=5.0
+        )
+    )
+    service = AndroidServicesService(backend)
+
+    with pytest.raises(DeviceNotFoundError):
+        await service.stop_service("bogus", "com.example.app/.MyService")
+
+
+@pytest.mark.asyncio
+async def test_stop_service__permission_denial_raises_permission_denied() -> None:
+    backend = FakeBackend(
+        stop_service_result=CommandResult(
+            stdout="",
+            stderr=(
+                "java.lang.SecurityException: Permission Denial: stopService "
+                "from pid=1234, uid=2000\n"
+            ),
+            exit_code=1,
+            duration_ms=5.0,
+        )
+    )
+    service = AndroidServicesService(backend)
+
+    with pytest.raises(PermissionDeniedError):
+        await service.stop_service("emulator-5554", "com.example.app/.MyService")
+
+
+@pytest.mark.asyncio
+async def test_stop_service__unrecognized_error_line_raises_backend_error() -> None:
+    backend = FakeBackend(
+        stop_service_result=CommandResult(
+            stdout="Error: something entirely unexpected\n", stderr="", exit_code=1, duration_ms=5.0
+        )
+    )
+    service = AndroidServicesService(backend)
+
+    with pytest.raises(BackendError):
+        await service.stop_service("emulator-5554", "com.example.app/.MyService")
+
+
+@pytest.mark.asyncio
+async def test_stop_service__unrecognized_outcome_no_markers_is_was_running_none() -> None:
+    backend = FakeBackend(
+        stop_service_result=CommandResult(
+            stdout="Stopping service: Intent { cmp=com.example.app/.MyService }\n",
+            stderr="",
+            exit_code=0,
+            duration_ms=5.0,
+        )
+    )
+    service = AndroidServicesService(backend)
+
+    result = await service.stop_service("emulator-5554", "com.example.app/.MyService")
+
+    assert result.stopped is False
+    assert result.was_running is None
+
+
+@pytest.mark.asyncio
+async def test_stop_service__adb_unavailable_propagates() -> None:
+    service = AndroidServicesService(FakeBackend(unavailable=True))
+
+    with pytest.raises(AdbUnavailableError):
+        await service.stop_service("emulator-5554", "com.example.app/.MyService")
+
+
+def test_stop_service_result_summary_variants() -> None:
+    stopped = StopServiceResult(
+        serial="emulator-5554",
+        component="com.x/.Y",
+        user_id=None,
+        stopped=True,
+        was_running=True,
+        output="",
+    ).summary()
+    assert stopped == "Stopped service com.x/.Y on emulator-5554."
+
+    not_running = StopServiceResult(
+        serial="emulator-5554",
+        component="com.x/.Y",
+        user_id=None,
+        stopped=False,
+        was_running=False,
+        output="",
+    ).summary()
+    assert "was not running" in not_running

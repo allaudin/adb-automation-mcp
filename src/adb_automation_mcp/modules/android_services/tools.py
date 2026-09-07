@@ -15,6 +15,7 @@ from adb_automation_mcp.modules.android_services.service import (
     AndroidServicesService,
     StartForegroundServiceResult,
     StartServiceResult,
+    StopServiceResult,
 )
 from adb_automation_mcp.registry import category
 
@@ -138,3 +139,63 @@ async def start_foreground_service(
     services = cast("dict[str, object]", ctx.lifespan_context["services"])
     android_services = cast(AndroidServicesService, services["android_services"])
     return await android_services.start_foreground_service(serial, component, user_id=user_id)
+
+
+@category("write")
+async def stop_service(
+    ctx: Context, serial: str, component: str, user_id: int | None = None
+) -> StopServiceResult:
+    """Stop a started Android service: `adb shell am stop-service`.
+
+    The counterpart to start_service — stops a service that was started via
+    `am` (or `startService()`). Not an error if the service isn't running; that
+    comes back as stopped=false / was_running=false, since the intended end
+    state is reached either way.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+        component: The service to stop, in "package/class" form, e.g.
+            "com.example.app/.MyService" (`-n`). A relative class name
+            (starting with ".") is resolved against the package.
+        user_id: Stop the service for one specific Android user (`--user`,
+            see list_users). Omit to use am's default user.
+
+    Returns:
+        The serial, component, user_id, and: stopped (True only when am
+        reported "Service stopped"), was_running (False when am reported "was
+        not running", None if the outcome wasn't recognized), plus the raw am
+        output.
+
+    Error handling:
+        An empty component or negative user_id raises INVALID_ARGUMENT before
+        any adb call. A malformed component string raises COMPONENT_NOT_FOUND —
+        but note `am stop-service` does NOT distinguish an unknown service
+        component from a known-but-not-running one, so an unknown component
+        comes back as was_running=false, not an error. An unknown serial raises
+        DEVICE_NOT_FOUND; an unreachable adb binary raises ADB_UNAVAILABLE; a
+        permission denial raises PERMISSION_DENIED; any other am failure raises
+        BACKEND_ERROR.
+
+    Example:
+        Called with serial="emulator-5554",
+        component="com.example.app/.MyService". A typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "Stopped service com.example.app/.MyService on emulator-5554.",
+          "data": {
+            "serial": "emulator-5554",
+            "component": "com.example.app/.MyService",
+            "user_id": null,
+            "stopped": true,
+            "was_running": true,
+            "output": "Stopping service: Intent { cmp=com.example.app/.MyService }\\nService stopped\\n"
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    android_services = cast(AndroidServicesService, services["android_services"])
+    return await android_services.stop_service(serial, component, user_id=user_id)

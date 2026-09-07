@@ -10,7 +10,11 @@ from typing import cast
 
 from fastmcp import Context
 
-from adb_automation_mcp.modules.app_data.service import AppDataService, ClearAppDataResult
+from adb_automation_mcp.modules.app_data.service import (
+    AppDataService,
+    ClearAppCacheResult,
+    ClearAppDataResult,
+)
 from adb_automation_mcp.registry import category
 
 
@@ -70,3 +74,62 @@ async def clear_app_data(
     services = cast("dict[str, object]", ctx.lifespan_context["services"])
     app_data = cast(AppDataService, services["app_data"])
     return await app_data.clear_app_data(serial, package_name, user_id=user_id)
+
+
+@category("write")
+async def clear_app_cache(
+    ctx: Context, serial: str, package_name: str, user_id: int | None = None
+) -> ClearAppCacheResult:
+    """Clear only a package's cache, leaving its data intact.
+
+    Prefers `adb shell pm clear --cache-only` (Android 11+). If that command
+    is unsupported, or hangs (a known bug on some emulator images), it falls
+    back to removing the package's per-user cache directories directly
+    (`/data/user*/<uid>/<pkg>/cache` and `code_cache`) — which needs adbd
+    running as root. Either path touches only cache, never the app's normal
+    data; this never falls back to the destructive unscoped `pm clear`.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+        package_name: The package whose cache to clear, e.g. "com.example.app".
+        user_id: Clear for one specific Android user (see list_users). Omit to
+            clear for the current user — cache is per-user, so a user is always
+            resolved and reported back.
+
+    Returns:
+        The serial, package_name, the user_id actually cleared, method
+        ("pm_clear_cache_only" or "rm_cache_dirs"), success (always True — see
+        Error handling), and output.
+
+    Error handling:
+        A build where `pm clear --cache-only` is unavailable AND the direct
+        cache-dir removal is denied (adbd not root) raises
+        CACHE_ONLY_UNSUPPORTED. An unknown serial or unresponsive adb binary
+        raises DEVICE_NOT_FOUND/ADB_UNAVAILABLE. On the `pm` path: a package
+        not installed for the target user raises PACKAGE_NOT_FOUND, a
+        permission-refused clear raises PERMISSION_DENIED, pm's bare "Failed"
+        raises ANDROID_REJECTED. Any other failure raises BACKEND_ERROR.
+
+    Example:
+        Called with serial="emulator-5554", package_name="com.example.app".
+        A typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "Cleared cache for com.example.app (user 0) on emulator-5554.",
+          "data": {
+            "serial": "emulator-5554",
+            "package_name": "com.example.app",
+            "user_id": 0,
+            "method": "pm_clear_cache_only",
+            "success": true,
+            "output": "Success\\n"
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    app_data = cast(AppDataService, services["app_data"])
+    return await app_data.clear_app_cache(serial, package_name, user_id=user_id)

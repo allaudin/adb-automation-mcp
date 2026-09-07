@@ -10,7 +10,7 @@ from typing import cast
 
 from fastmcp import Context
 
-from adb_automation_mcp.modules.files.service import FilesService, PullFileResult
+from adb_automation_mcp.modules.files.service import FilesService, PullFileResult, PushFileResult
 from adb_automation_mcp.registry import category
 
 
@@ -71,3 +71,59 @@ async def pull_file(ctx: Context, serial: str, remote_path: str, local_path: str
     services = cast("dict[str, object]", ctx.lifespan_context["services"])
     files = cast(FilesService, services["files"])
     return await files.pull_file(serial, remote_path, local_path)
+
+
+@category("write")
+async def push_file(ctx: Context, serial: str, local_path: str, remote_path: str) -> PushFileResult:
+    """Copy one file from this server's host to a device: `adb push`.
+
+    The mirror of pull_file. The host source is confined to the server's
+    configured local_root (the same gate pull_file writes into) — reading a
+    host path outside it, or one that doesn't exist, is refused before any
+    device round-trip. remote_path is passed to `adb push` exactly as given.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+        local_path: The host file to copy, relative to (or, if absolute, still
+            required to resolve inside) the server's configured local_root.
+        remote_path: The device-side destination path, e.g.
+            "/data/local/tmp/test.txt".
+
+    Returns:
+        The serial, the resolved local_path actually read, remote_path,
+        success (always True — see Error handling), and the raw adb push
+        output. Only returned on success.
+
+    Error handling:
+        local_path is checked before any device round-trip: if the server has
+        no local_root configured, or local_path resolves outside it, or names
+        no existing file, the call is refused (POLICY_DENIED / INVALID_ARGUMENT)
+        without touching the device. Beyond that: an unknown serial or
+        unresponsive adb binary raises DEVICE_NOT_FOUND/ADB_UNAVAILABLE; a
+        remote_path on a read-only filesystem or one the shell user can't write
+        raises PERMISSION_DENIED; a remote_path whose parent directory doesn't
+        exist raises REMOTE_FILE_NOT_FOUND; any other `adb push` failure raises
+        BACKEND_ERROR.
+
+    Example:
+        Called with serial="emulator-5554", local_path="test.txt",
+        remote_path="/data/local/tmp/test.txt". A typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "Pushed /var/adb-files/test.txt to /data/local/tmp/test.txt on emulator-5554.",
+          "data": {
+            "serial": "emulator-5554",
+            "local_path": "/var/adb-files/test.txt",
+            "remote_path": "/data/local/tmp/test.txt",
+            "success": true,
+            "output": "/var/adb-files/test.txt: 1 file pushed, 0 skipped. 0.0 MB/s (12 bytes in 0.001s)\\n"
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    files = cast(FilesService, services["files"])
+    return await files.push_file(serial, local_path, remote_path)

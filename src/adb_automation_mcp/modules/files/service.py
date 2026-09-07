@@ -1,9 +1,9 @@
 """Domain logic for the files module: copying files between a connected
-Android device and this server's host (`adb pull`, via the existing
-AdbBackend.pull primitive — no new backend primitive needed). `adb push` and
-any private-app-data semantics (e.g. `run-as` for another app's sandboxed
-files) aren't handled here — remote_path is passed to `adb pull` exactly as
-given.
+Android device and this server's host — `adb pull` (device → host) and
+`adb push` (host → device), via the existing AdbBackend primitives. Both
+directions confine the host path to `ADB_AUTOMATION_LOCAL_ROOT`; private-app-data
+semantics (e.g. `run-as` for another app's sandboxed files) aren't handled —
+the remote path is passed to adb exactly as given.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from adb_automation_mcp.backend.protocol import AdbBackend, CommandResult
 from adb_automation_mcp.errors import (
     BackendError,
     DeviceNotFoundError,
+    InvalidArgumentError,
     PermissionDeniedError,
     PolicyViolationError,
     RemoteFileNotFoundError,
@@ -44,6 +45,26 @@ class PullFileResult(BaseModel):
 
     def summary(self) -> str:
         return f"Pulled {self.remote_path} from {self.serial} to {self.local_path}."
+
+
+class PushFileResult(BaseModel):
+    """Outcome of pushing one host file to a device (`adb push`).
+
+    Only ever returned on success — `adb push` resolves synchronously to a
+    definitive exit code, so every failure kind (host source missing / outside
+    local_root, unwritable remote path, device unavailable, other) is raised,
+    not returned as data. success is always True here (an explicit field for
+    the same reason as PullFileResult.success).
+    """
+
+    serial: str
+    local_path: str
+    remote_path: str
+    success: bool
+    output: str
+
+    def summary(self) -> str:
+        return f"Pushed {self.local_path} to {self.remote_path} on {self.serial}."
 
 
 class FilesService:
@@ -79,6 +100,53 @@ class FilesService:
             success=True,
             output=result.stdout,
         )
+
+    async def push_file(self, serial: str, local_path: str, remote_path: str) -> PushFileResult:
+        resolved_local_path = self._resolve_local_path(local_path)
+        if not resolved_local_path.is_file():
+            raise InvalidArgumentError(
+                f"local_path '{local_path}' does not name an existing file inside local_root.",
+                details={"local_path": str(resolved_local_path)},
+            )
+        result = await self._backend.push(serial, str(resolved_local_path), remote_path)
+        _raise_for_push_failure(serial, str(resolved_local_path), remote_path, result)
+        return PushFileResult(
+            serial=serial,
+            local_path=str(resolved_local_path),
+            remote_path=remote_path,
+            success=True,
+            output=result.stdout,
+        )
+
+
+def _raise_for_push_failure(
+    serial: str, local_path: str, remote_path: str, result: CommandResult
+) -> None:
+    if result.exit_code == 0:
+        return
+    message = (result.stderr or result.stdout).strip() or "adb push exited non-zero."
+    if message.startswith("adb:") and "not found" in message:
+        raise DeviceNotFoundError(message, details={"serial": serial})
+    lowered = message.lower()
+    if "read-only file system" in lowered or "permission denied" in lowered:
+        raise PermissionDeniedError(
+            message, details={"serial": serial, "remote_path": remote_path}
+        )
+    # A remote *directory* that doesn't exist: "adb: error: failed to copy
+    # '...' to '...': remote No such file or directory".
+    if "no such file or directory" in lowered:
+        raise RemoteFileNotFoundError(
+            message, details={"serial": serial, "remote_path": remote_path}
+        )
+    raise BackendError(
+        message,
+        details={
+            "serial": serial,
+            "local_path": local_path,
+            "remote_path": remote_path,
+            "exit_code": result.exit_code,
+        },
+    )
 
 
 def _raise_for_pull_failure(serial: str, remote_path: str, local_path: str, result: CommandResult) -> None:

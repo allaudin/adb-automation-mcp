@@ -167,3 +167,50 @@ async def test_pull_file_tool_backend_failure_returns_backend_error(tmp_path: Pa
     assert result.data.status == "error"
     assert result.data.error is not None
     assert result.data.error.code == "BACKEND_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_push_file_tool_round_trips_over_mcp_protocol(tmp_path: Path) -> None:
+    (tmp_path / "f.txt").write_text("hi")
+    mcp = _build_test_server_with_local_root(FakeBackend(), tmp_path)
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "push_file",
+            {"serial": "emulator-5554", "local_path": "f.txt", "remote_path": "/data/local/tmp/f.txt"},
+        )
+    assert result.data.status == "success"
+    assert result.data.data.remote_path == "/data/local/tmp/f.txt"
+
+
+@pytest.mark.asyncio
+async def test_push_file_tool_missing_local_returns_invalid_argument(tmp_path: Path) -> None:
+    mcp = _build_test_server_with_local_root(FakeBackend(), tmp_path)
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "push_file",
+            {"serial": "emulator-5554", "local_path": "nope.txt", "remote_path": "/data/local/tmp/x"},
+        )
+    assert result.data.status == "error"
+    assert result.data.error is not None
+    assert result.data.error.code == "INVALID_ARGUMENT"
+
+
+@pytest.mark.asyncio
+async def test_push_file_tool_no_local_root_returns_policy_denied() -> None:
+    mcp = _build_test_server_with_local_root(FakeBackend(), None)
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "push_file",
+            {"serial": "emulator-5554", "local_path": "f.txt", "remote_path": "/data/local/tmp/x"},
+        )
+    assert result.data.status == "error"
+    assert result.data.error is not None
+    assert result.data.error.code == "POLICY_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_push_file_tool_is_registered(tmp_path: Path) -> None:
+    mcp = _build_test_server_with_local_root(FakeBackend(), tmp_path)
+    async with Client(mcp) as client:
+        names = {t.name for t in await client.list_tools()}
+    assert "push_file" in names

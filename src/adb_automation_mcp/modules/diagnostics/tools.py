@@ -87,7 +87,7 @@ async def get_adb_version(ctx: Context) -> AdbVersionInfo:
             "revision": null,
             "installed_path": "/usr/lib/android-sdk/platform-tools/adb",
             "running_on": "Linux 6.8.0 (x86_64)",
-            "raw": "Android Debug Bridge version 1.0.41\nVersion 35.0.2\n..."
+            "raw": "Android Debug Bridge version 1.0.41\\nVersion 35.0.2\\n..."
           },
           "error": null
         }

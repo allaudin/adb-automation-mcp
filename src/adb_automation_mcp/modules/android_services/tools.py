@@ -13,6 +13,7 @@ from fastmcp import Context
 
 from adb_automation_mcp.modules.android_services.service import (
     AndroidServicesService,
+    ServiceStatus,
     StartForegroundServiceResult,
     StartServiceResult,
     StopServiceResult,
@@ -199,3 +200,72 @@ async def stop_service(
     services = cast("dict[str, object]", ctx.lifespan_context["services"])
     android_services = cast(AndroidServicesService, services["android_services"])
     return await android_services.stop_service(serial, component, user_id=user_id)
+
+
+@category("read")
+async def get_service_status(
+    ctx: Context, serial: str, component: str
+) -> ServiceStatus:
+    """Status snapshot for one Android Service: `adb shell dumpsys activity services <component>`.
+
+    The way to verify what start_service / start_foreground_service actually
+    did — process/PID, foreground state, start bookkeeping — without parsing
+    dumpsys yourself. A Service can be active for more than one Android user at
+    once, so instances is a list.
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+        component: The service to inspect, in "package/class" form, e.g.
+            "com.example.app/.MyService" (relative ".Class" is resolved against
+            the package).
+
+    Returns:
+        running (False with an empty instances list when the service isn't
+        active anywhere — a normal result, not an error), and one entry per
+        active instance: user_id, pid, process_name, package_name,
+        is_foreground / foreground_id, start_requested / last_start_id,
+        created_from_fg, and start_foreground_count. Fields this Android
+        version's dump omits come back null.
+
+    Error handling:
+        An empty component raises INVALID_ARGUMENT before any adb call. An
+        unknown serial raises DEVICE_NOT_FOUND; an unreachable adb binary
+        raises ADB_UNAVAILABLE. `dumpsys activity services` can't tell a
+        stopped service from an unknown or malformed component — all report
+        "no services match" — so none of those raise; they come back as
+        running=false.
+
+    Example:
+        Called with serial="emulator-5554",
+        component="com.example.app/.MyFgService". A typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "com.example.app/.MyFgService is running on emulator-5554: 2 instance(s), 1 foreground.",
+          "data": {
+            "serial": "emulator-5554",
+            "component": "com.example.app/.MyFgService",
+            "running": true,
+            "instances": [
+              {
+                "user_id": 0,
+                "pid": 1884,
+                "process_name": "com.example.app",
+                "package_name": "com.example.app",
+                "is_foreground": true,
+                "foreground_id": 1,
+                "start_requested": true,
+                "last_start_id": 2,
+                "created_from_fg": false,
+                "start_foreground_count": 1
+              }
+            ]
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    android_services = cast(AndroidServicesService, services["android_services"])
+    return await android_services.get_service_status(serial, component)

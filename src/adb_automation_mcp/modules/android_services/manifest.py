@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from adb_automation_mcp.modules.android_services.service import AndroidServicesService
 from adb_automation_mcp.modules.android_services.tools import (
+    get_service_status,
     start_foreground_service,
     start_service,
     stop_service,
@@ -16,6 +17,6 @@ from adb_automation_mcp.registry import ModuleManifest
 MODULE = ModuleManifest(
     name="android_services",
     service_factory=AndroidServicesService,
-    tools=[start_service, start_foreground_service, stop_service],
+    tools=[start_service, start_foreground_service, stop_service, get_service_status],
     resources=[],
 )

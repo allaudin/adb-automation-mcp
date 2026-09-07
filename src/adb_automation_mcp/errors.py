@@ -256,6 +256,18 @@ class PowerStateUnavailableError(AdbError):
     code = "POWER_STATE_UNAVAILABLE"
 
 
+class MemoryInfoUnavailableError(AdbError):
+    """`dumpsys meminfo` / `dumpsys procstats` ran but its output carried
+    none of the markers the requesting tool reads — the dump's format
+    drifted across Android versions, or the output was truncated /
+    unrecognizable, so no structured snapshot could be built. Distinct from
+    PACKAGE_NOT_RUNNING (the process simply isn't running) and from an empty
+    but valid history result.
+    """
+
+    code = "MEMORY_INFO_UNAVAILABLE"
+
+
 class ProcessMemoryUnavailableError(AdbError):
     """`dumpsys meminfo` ran and the target process exists, but the output
     carried none of the markers this tool reads (no "MEMINFO in pid" header

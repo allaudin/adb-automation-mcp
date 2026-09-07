@@ -14,11 +14,11 @@ safe primitive and is what kill_background_processes exposes.
 
 from __future__ import annotations
 
-import re
 import shlex
 
 from pydantic import BaseModel
 
+from adb_automation_mcp import meminfo
 from adb_automation_mcp.backend.protocol import AdbBackend, CommandResult
 from adb_automation_mcp.errors import (
     BackendError,
@@ -27,36 +27,6 @@ from adb_automation_mcp.errors import (
     PackageNotRunningError,
     PermissionDeniedError,
     ProcessMemoryUnavailableError,
-)
-
-# `** MEMINFO in pid 1224 [com.android.systemui] **` — dumpsys meminfo's
-# per-process header, long-stable across Android versions.
-_MEMINFO_PID_RE = re.compile(r"\*\*\s*MEMINFO in pid\s+(?P<pid>\d+)\s+\[(?P<name>[^\]]+)\]")
-
-# The single "TOTAL PSS: N   TOTAL RSS: N   TOTAL SWAP (KB): N" line at the
-# bottom of the "App Summary" table (Android 8+). Older builds print a
-# different, RSS-less "TOTAL N" line — treated as best-effort: if this
-# doesn't match, the totals are left None rather than raising.
-_TOTAL_RE = re.compile(
-    r"TOTAL PSS:\s*(?P<pss>\d+)\s+TOTAL RSS:\s*(?P<rss>\d+)"
-    r"\s+TOTAL SWAP(?:\s*\(KB\))?:\s*(?P<swap>\d+)"
-)
-
-# "No process found for: <target>" — how `dumpsys meminfo -s X` reports that
-# nothing is running for X (it still exits 0).
-_MEMINFO_NOT_RUNNING = "No process found for:"
-
-# Labels in the "App Summary" table whose first integer column is the Pss
-# value. "Unknown" is deliberately excluded — on this table its Pss column
-# is blank, so its first integer is actually the Rss value.
-_SUMMARY_LABELS: tuple[str, ...] = (
-    "Java Heap",
-    "Native Heap",
-    "Code",
-    "Stack",
-    "Graphics",
-    "Private Other",
-    "System",
 )
 
 
@@ -281,15 +251,15 @@ class ProcessesService:
         _raise_for_shell_failure(serial, result)
 
         text = result.stdout
-        if _MEMINFO_NOT_RUNNING in text:
+        if meminfo.NOT_RUNNING_MARKER in text:
             raise PackageNotRunningError(
                 f"No running process found for '{target}' on {serial}.",
                 details={"serial": serial, "target": target},
             )
 
-        header = _MEMINFO_PID_RE.search(text)
-        totals = _TOTAL_RE.search(text)
-        if header is None and totals is None:
+        pid, process_name = meminfo.parse_pid_header(text)
+        summary = meminfo.parse_app_summary(text)
+        if pid is None and summary["total_pss_kb"] is None:
             raise ProcessMemoryUnavailableError(
                 "dumpsys meminfo produced no recognizable 'MEMINFO in pid' header "
                 "or 'TOTAL PSS' summary line.",
@@ -299,18 +269,9 @@ class ProcessesService:
         return ProcessMemory(
             serial=serial,
             target=target,
-            pid=int(header.group("pid")) if header else None,
-            process_name=header.group("name") if header else None,
-            java_heap_pss_kb=_summary_pss(text, "Java Heap"),
-            native_heap_pss_kb=_summary_pss(text, "Native Heap"),
-            code_pss_kb=_summary_pss(text, "Code"),
-            stack_pss_kb=_summary_pss(text, "Stack"),
-            graphics_pss_kb=_summary_pss(text, "Graphics"),
-            private_other_pss_kb=_summary_pss(text, "Private Other"),
-            system_pss_kb=_summary_pss(text, "System"),
-            total_pss_kb=int(totals.group("pss")) if totals else None,
-            total_rss_kb=int(totals.group("rss")) if totals else None,
-            total_swap_kb=int(totals.group("swap")) if totals else None,
+            pid=pid,
+            process_name=process_name,
+            **summary,
         )
 
 
@@ -344,11 +305,6 @@ def _parse_ps(output: str) -> list[ProcessInfo]:
             ProcessInfo(pid=pid, ppid=ppid, user=user, rss_kb=rss_kb, name=name.strip())
         )
     return rows
-
-
-def _summary_pss(text: str, label: str) -> int | None:
-    match = re.search(rf"^\s*{re.escape(label)}:\s*(\d+)", text, re.MULTILINE)
-    return int(match.group(1)) if match else None
 
 
 def _raise_for_shell_failure(serial: str, result: CommandResult) -> None:

@@ -46,6 +46,7 @@ nav:
       - displays: reference/displays.md
       - files: reference/files.md
       - instrumentation: reference/instrumentation.md
+      - memory: reference/memory.md
       - network: reference/network.md
       - permissions: reference/permissions.md
       - power: reference/power.md

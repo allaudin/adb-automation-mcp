@@ -84,3 +84,45 @@ async def test_get_power_state_tool_adb_failure_returns_device_not_found_error()
     assert result.data.status == "error"
     assert result.data.error is not None
     assert result.data.error.code == "DEVICE_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_reboot_device_tool_round_trips_when_destructive_allowed() -> None:
+    mcp = _build_test_server(FakeBackend(), allow_destructive=True)
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("reboot_device", {"serial": "emulator-5554"})
+
+    assert result.data.status == "success"
+    assert result.data.data.serial == "emulator-5554"
+    assert result.data.data.mode == "system"
+    assert result.data.data.accepted is True
+
+
+@pytest.mark.asyncio
+async def test_reboot_device_tool_not_registered_when_destructive_disallowed() -> None:
+    mcp = _build_test_server(FakeBackend(), allow_destructive=False)
+
+    async with Client(mcp) as client:
+        tools = await client.list_tools()
+
+    assert "reboot_device" not in {tool.name for tool in tools}
+
+
+@pytest.mark.asyncio
+async def test_reboot_device_tool_unknown_serial_returns_device_not_found_error() -> None:
+    mcp = _build_test_server(
+        FakeBackend(
+            reboot_result=CommandResult(
+                stdout="", stderr="error: device 'bogus' not found\n", exit_code=1, duration_ms=10.0
+            )
+        ),
+        allow_destructive=True,
+    )
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("reboot_device", {"serial": "bogus"})
+
+    assert result.data.status == "error"
+    assert result.data.error is not None
+    assert result.data.error.code == "DEVICE_NOT_FOUND"

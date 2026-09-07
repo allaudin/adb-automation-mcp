@@ -185,6 +185,15 @@ class SubprocessBackend:
     async def unroot(self, serial: str) -> CommandResult:
         return await self._run("-s", serial, "unroot")
 
+    async def reboot(self, serial: str, mode: str | None = None) -> CommandResult:
+        # `adb -s <serial> reboot [bootloader|recovery|sideload|...]` — with no
+        # mode, a normal reboot into the system image. adb returns as soon as the
+        # request is delivered (exit 0), well before the device is actually back.
+        args = ["-s", serial, "reboot"]
+        if mode is not None:
+            args.append(mode)
+        return await self._run(*args)
+
 
 def _parse_devices(stdout: str) -> list[DeviceInfo]:
     devices: list[DeviceInfo] = []

@@ -8,7 +8,12 @@ import pytest
 
 from adb_automation_mcp.backend.protocol import CommandResult
 from adb_automation_mcp.backend.testing import FakeBackend
-from adb_automation_mcp.errors import BackendError, DeviceNotFoundError, PowerStateUnavailableError
+from adb_automation_mcp.errors import (
+    AdbUnavailableError,
+    BackendError,
+    DeviceNotFoundError,
+    PowerStateUnavailableError,
+)
 from adb_automation_mcp.modules.power.service import PowerService
 
 
@@ -106,3 +111,56 @@ async def test_get_power_state__unclassified_failure_raises_backend_error() -> N
 
     with pytest.raises(BackendError):
         await service.get_power_state("emulator-5554")
+
+
+# --- reboot_device ---------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reboot_device__sends_adb_reboot_and_reports_accepted() -> None:
+    captured: dict[str, object] = {}
+
+    class RecordingBackend(FakeBackend):
+        async def reboot(self, serial: str, mode: str | None = None) -> CommandResult:
+            captured["serial"] = serial
+            captured["mode"] = mode
+            return await super().reboot(serial, mode)
+
+    result = await PowerService(RecordingBackend()).reboot_device("emulator-5554")
+
+    assert captured == {"serial": "emulator-5554", "mode": None}
+    assert result.serial == "emulator-5554"
+    assert result.mode == "system"
+    assert result.accepted is True
+    assert result.output == ""
+
+
+@pytest.mark.asyncio
+async def test_reboot_device__unknown_serial_raises_device_not_found() -> None:
+    # `adb -s bogus reboot` uses "error:" (not "adb:") for the not-found line.
+    backend = FakeBackend(
+        reboot_result=CommandResult(
+            stdout="", stderr="error: device 'bogus' not found\n", exit_code=1, duration_ms=10.0
+        )
+    )
+
+    with pytest.raises(DeviceNotFoundError):
+        await PowerService(backend).reboot_device("bogus")
+
+
+@pytest.mark.asyncio
+async def test_reboot_device__unclassified_failure_raises_backend_error() -> None:
+    backend = FakeBackend(
+        reboot_result=CommandResult(
+            stdout="", stderr="error: closed\n", exit_code=1, duration_ms=10.0
+        )
+    )
+
+    with pytest.raises(BackendError):
+        await PowerService(backend).reboot_device("emulator-5554")
+
+
+@pytest.mark.asyncio
+async def test_reboot_device__backend_unavailable_raises_adb_unavailable() -> None:
+    with pytest.raises(AdbUnavailableError):
+        await PowerService(FakeBackend(unavailable=True)).reboot_device("emulator-5554")

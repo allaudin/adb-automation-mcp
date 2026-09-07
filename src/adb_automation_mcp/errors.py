@@ -265,6 +265,17 @@ class NetworkToolUnavailableError(AdbError):
     code = "NETWORK_TOOL_UNAVAILABLE"
 
 
+class ConnectivityStateUnavailableError(AdbError):
+    """`dumpsys connectivity` ran but its output carried none of the markers
+    this tool reads (neither an `Active default network:` line nor a
+    `NetworkAgentInfo{...}` / `Current Networks:` section) — the dump's format
+    drifted, the connectivity service isn't registered, or the output was
+    truncated/unrecognizable, so no snapshot could be built.
+    """
+
+    code = "CONNECTIVITY_STATE_UNAVAILABLE"
+
+
 class PortForwardConflictError(AdbError):
     """`adb forward --no-rebind` was asked to bind a host endpoint that already
     has a forward on it ("cannot rebind existing socket"). The caller explicitly

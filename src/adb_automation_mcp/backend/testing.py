@@ -83,6 +83,7 @@ class FakeBackend:
         disconnect_result: CommandResult | None = None,
         root_result: CommandResult | None = None,
         unroot_result: CommandResult | None = None,
+        reboot_result: CommandResult | None = None,
         shell_result: CommandResult | None = None,
         dumpsys_user_result: CommandResult | None = None,
         user_info_result: CommandResult | None = None,
@@ -148,8 +149,12 @@ class FakeBackend:
         set_setting_result: CommandResult | None = None,
         screenrecord_result: CommandResult | None = None,
         dumpsys_display_result: CommandResult | None = None,
+        wm_size_result: CommandResult | None = None,
+        wm_density_result: CommandResult | None = None,
         dumpsys_power_result: CommandResult | None = None,
         ip_addr_show_result: CommandResult | None = None,
+        ip_route_result: CommandResult | None = None,
+        dumpsys_connectivity_result: CommandResult | None = None,
         device_timestamp_result: CommandResult | None = None,
         device_utc_offset_result: CommandResult | None = None,
     ) -> None:
@@ -210,6 +215,13 @@ class FakeBackend:
         # (also exit 0) — override this fixture to simulate that.
         self._unroot_result = unroot_result or CommandResult(
             stdout="restarting adbd as non root\n", stderr="", exit_code=0, duration_ms=600.0
+        )
+        # `adb -s <serial> reboot` — silent, exit 0, returns the moment the
+        # request is delivered (long before the device is back). Verified live
+        # against a car AVD. An unknown serial fails at the adb-client level with
+        # "error: device '<serial>' not found", exit 1 — override to simulate.
+        self._reboot_result = reboot_result or CommandResult(
+            stdout="", stderr="", exit_code=0, duration_ms=100.0
         )
         # Real `adb shell am get-current-user` output for the common case (a
         # single-user device, primary/owner user), captured from an actual run.
@@ -891,6 +903,20 @@ class FakeBackend:
             exit_code=0,
             duration_ms=160.0,
         )
+        # `wm size` / `wm size -d N` — WindowManagerShellCommand's long-stable
+        # wording: "Physical size: WxH", plus a second "Override size: WxH" line
+        # only when an override is in effect. Verified live on a car AVD (a
+        # non-existent display id prints "Physical size: 0x0", exit 0). Override
+        # this fixture to exercise the override-present path.
+        self._wm_size_result = wm_size_result or CommandResult(
+            stdout="Physical size: 1408x792\n", stderr="", exit_code=0, duration_ms=30.0
+        )
+        # `wm density` / `wm density -d N` — "Physical density: N", plus
+        # "Override density: N" only when overridden. Verified live on a car AVD
+        # (a non-existent display id prints "Physical density: -1", exit 0).
+        self._wm_density_result = wm_density_result or CommandResult(
+            stdout="Physical density: 160\n", stderr="", exit_code=0, duration_ms=30.0
+        )
         # `dumpsys power` — a real dump is hundreds of lines; trimmed to the
         # PowerManagerService block this module actually parses. Shaped on
         # PowerManagerService.dump()'s documented, long-stable field names.
@@ -950,6 +976,44 @@ class FakeBackend:
             stderr="",
             exit_code=0,
             duration_ms=60.0,
+        )
+        # `ip route` — one route per line, first token the destination
+        # ("default" or a CIDR) followed by ` key value` pairs (via/dev/proto/
+        # scope/src/metric). Captured live from a car AVD (a single on-link
+        # route, no default). Override to exercise default-route / metric
+        # parsing.
+        self._ip_route_result = ip_route_result or CommandResult(
+            stdout="10.0.2.0/24 dev eth0 proto kernel scope link src 10.0.2.15\n",
+            stderr="",
+            exit_code=0,
+            duration_ms=25.0,
+        )
+        # `dumpsys connectivity` — a real dump is hundreds of lines; trimmed to
+        # the markers ConnectivityService.get_connectivity_state reads: the
+        # "Active default network: N" line and the "Current Networks:" section's
+        # per-network "NetworkAgentInfo{network{N} ... ni{TYPE STATE ...} ...
+        # nc{[ Transports: ... Capabilities: ... ]} ...}" line. Field shapes
+        # transcribed from live car-AVD output (a validated CELLULAR default
+        # network).
+        self._dumpsys_connectivity_result = dumpsys_connectivity_result or CommandResult(
+            stdout=(
+                "Active default network: 100\n"
+                "\n"
+                "Current Networks:\n"
+                "  NetworkAgentInfo{network{100}  handle{432902426637}  "
+                "ni{MOBILE[NR] CONNECTED extra: epc.tmobile.com} "
+                "created=2026-09-06T18:36:11.660Z Score(Policies : IS_VALIDATED ; KeepConnected : 0)  "
+                "lp{{InterfaceName: eth0 LinkAddresses: [ 10.0.2.15/24 ] Routes: [ 0.0.0.0/0 -> 10.0.2.2 eth0 ]}}  "
+                "nc{[ Transports: CELLULAR Capabilities: "
+                "INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VPN&VALIDATED&NOT_ROAMING&FOREGROUND&NOT_CONGESTED"
+                "&NOT_SUSPENDED&NOT_VCN_MANAGED LinkUpBandwidth>=60000Kbps LinkDnBandwidth>=145000Kbps "
+                "SubscriptionIds: {1} UnderlyingNetworks: Null]}  factorySerialNumber=5}\n"
+                "    Nat464Xlat:\n"
+                "      <not started>\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=200.0,
         )
         # `date +%Y-%m-%dT%H:%M:%S` / `date +%z` — toybox `date`'s documented
         # strftime-style `+FORMAT` support. Not captured from a live device
@@ -1150,10 +1214,18 @@ class FakeBackend:
             return self._screenrecord_result
         if command == "dumpsys display":
             return self._dumpsys_display_result
+        if command.startswith("wm size"):
+            return self._wm_size_result
+        if command.startswith("wm density"):
+            return self._wm_density_result
         if command == "dumpsys power":
             return self._dumpsys_power_result
+        if command == "dumpsys connectivity":
+            return self._dumpsys_connectivity_result
         if command == "ip addr show":
             return self._ip_addr_show_result
+        if command == "ip route":
+            return self._ip_route_result
         if command == "date +%Y-%m-%dT%H:%M:%S":
             return self._device_timestamp_result
         if command == "date +%z":
@@ -1246,3 +1318,7 @@ class FakeBackend:
     async def unroot(self, serial: str) -> CommandResult:
         self._raise_if_unavailable()
         return self._unroot_result
+
+    async def reboot(self, serial: str, mode: str | None = None) -> CommandResult:
+        self._raise_if_unavailable()
+        return self._reboot_result

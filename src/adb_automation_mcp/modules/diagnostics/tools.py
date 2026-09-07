@@ -13,6 +13,7 @@ from fastmcp import Context
 from adb_automation_mcp.modules.diagnostics.service import (
     AdbAvailability,
     AdbVersionInfo,
+    BugreportResult,
     DiagnosticsService,
 )
 from adb_automation_mcp.registry import category
@@ -96,3 +97,63 @@ async def get_adb_version(ctx: Context) -> AdbVersionInfo:
     services = cast("dict[str, object]", ctx.lifespan_context["services"])
     diagnostics = cast(DiagnosticsService, services["diagnostics"])
     return await diagnostics.get_adb_version()
+
+
+@category("write")
+async def generate_bugreport(
+    ctx: Context, serial: str, local_path: str, timeout_s: float = 300.0
+) -> BugreportResult:
+    """Generate a full Android bugreport and save it to the host: `adb -s
+    <serial> bugreport <local_path>`.
+
+    Runs the host `adb bugreport`, which builds the report on the device,
+    pulls it back, and (on modern devices) produces a single `.zip`. The
+    file lands under `<ADB_AUTOMATION_LOCAL_ROOT>/bugreports/`. The archive
+    is large and is not embedded in the response — only its path and size.
+    Categorized `write` because generating a bugreport briefly loads the
+    device (dumpstate).
+
+    Args:
+        serial: The target device's adb serial (see list_connected_devices).
+        local_path: Destination path relative to the server's local_root
+            `bugreports/` directory, e.g. "device.zip" or "run1/device.zip".
+            Must resolve inside local_root. If it has no extension, adb adds
+            `.zip`.
+        timeout_s: How long to wait for the bugreport, 60-600 seconds
+            (default 300). dumpstate can take minutes.
+
+    Returns:
+        The serial; local_path (the absolute host path actually written —
+        adb may have appended `.zip`); is_zip (true for the modern zipped
+        form, false for a legacy text bugreport); and size_bytes.
+
+    Error handling:
+        A blank local_path or an out-of-range timeout_s raises
+        INVALID_ARGUMENT. No configured local_root, or a local_path
+        escaping it, raises POLICY_DENIED. An unknown/offline serial or a
+        device that disconnects mid-capture raises DEVICE_NOT_FOUND; the adb
+        binary being unresponsive raises ADB_UNAVAILABLE. Any other non-zero
+        exit raises BACKEND_ERROR.
+
+    Example:
+        Called with serial="emulator-5554", local_path="device.zip". A
+        typical response:
+
+        ```json
+        {
+          "status": "success",
+          "message": "Saved zip bugreport from emulator-5554 to /data/out/bugreports/device.zip.",
+          "data": {
+            "serial": "emulator-5554",
+            "local_path": "/data/out/bugreports/device.zip",
+            "is_zip": true,
+            "size_bytes": 5310611,
+            "success": true
+          },
+          "error": null
+        }
+        ```
+    """
+    services = cast("dict[str, object]", ctx.lifespan_context["services"])
+    diagnostics = cast(DiagnosticsService, services["diagnostics"])
+    return await diagnostics.generate_bugreport(serial, local_path, timeout_s=timeout_s)

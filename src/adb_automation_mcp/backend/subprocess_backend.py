@@ -194,6 +194,15 @@ class SubprocessBackend:
             args.append(mode)
         return await self._run(*args)
 
+    async def bugreport(
+        self, serial: str, local_path: str, timeout_s: float | None = None
+    ) -> CommandResult:
+        # `adb -s <serial> bugreport <local_path>` — modern adb generates a
+        # zip on the device, pulls it, and prints "Bug report copied to
+        # <path>" (adding ".zip" if local_path has no extension). It can take
+        # minutes, so the caller passes a long timeout_s.
+        return await self._run("-s", serial, "bugreport", local_path, timeout_s=timeout_s)
+
 
 def _parse_devices(stdout: str) -> list[DeviceInfo]:
     devices: list[DeviceInfo] = []

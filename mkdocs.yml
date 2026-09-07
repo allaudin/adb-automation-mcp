@@ -43,8 +43,10 @@ nav:
       - broadcasts: reference/broadcasts.md
       - content: reference/content.md
       - date_time: reference/date_time.md
+      - debugging: reference/debugging.md
       - displays: reference/displays.md
       - files: reference/files.md
+      - graphics: reference/graphics.md
       - instrumentation: reference/instrumentation.md
       - memory: reference/memory.md
       - network: reference/network.md
@@ -53,6 +55,7 @@ nav:
       - processes: reference/processes.md
       - screen: reference/screen.md
       - settings: reference/settings.md
+      - tracing: reference/tracing.md
       - input: reference/input.md
       - ui: reference/ui.md
   - Integrations:

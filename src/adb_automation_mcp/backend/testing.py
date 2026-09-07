@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import base64
 import shlex
+from contextlib import suppress
+from pathlib import Path
 
 from adb_automation_mcp.backend.protocol import CommandResult, DeviceInfo, ExecOutResult
 from adb_automation_mcp.errors import AdbTimeoutError, AdbUnavailableError
@@ -135,6 +137,11 @@ class FakeBackend:
         dumpsys_meminfo_system_result: CommandResult | None = None,
         procstats_result: CommandResult | None = None,
         am_dumpheap_result: CommandResult | None = None,
+        activity_exit_info_result: CommandResult | None = None,
+        gfxinfo_framestats_result: CommandResult | None = None,
+        gfxinfo_reset_result: CommandResult | None = None,
+        perfetto_result: CommandResult | None = None,
+        bugreport_result: CommandResult | None = None,
         content_query_result: CommandResult | None = None,
         instrument_result: CommandResult | None = None,
         dropbox_print_result: CommandResult | None = None,
@@ -1055,6 +1062,110 @@ class FakeBackend:
             exit_code=0,
             duration_ms=1500.0,
         )
+        # `adb shell dumpsys activity exit-info <package>` — one
+        # "ApplicationExitInfo #N:" block per historical exit. Field shape
+        # (timestamp / pid / realUid / user / process / reason N (LABEL) /
+        # subreason / status / importance / pss / rss / state / trace /
+        # description / anrInfo) transcribed from live car-AVD output. Two
+        # records: a crash and a self-exit. Override with the header-only form
+        # to simulate "no history".
+        self._activity_exit_info_result = activity_exit_info_result or CommandResult(
+            stdout=(
+                "ACTIVITY MANAGER PROCESS EXIT INFO (dumpsys activity exit-info)\n"
+                "Last Timestamp of Persistence Into Persistent Storage: 2026-09-07 10:06:28.946\n"
+                "  package: com.example.app\n"
+                "    Historical Process Exit for uid=10234\n"
+                "        ApplicationExitInfo #0:\n"
+                "          timestamp=2026-09-06 22:39:39.266 pid=5486 realUid=10234 "
+                "packageUid=10234 definingUid=10234 user=0\n"
+                "          process=com.example.app reason=4 (APP CRASH(EXCEPTION)) "
+                "subreason=0 (UNKNOWN) status=0\n"
+                "          importance=400 pss=0.00 rss=167MB state=empty trace=null\n"
+                "          description=crash\n"
+                "          anrInfo=null\n"
+                "        ApplicationExitInfo #1:\n"
+                "          timestamp=2026-09-06 20:36:25.450 pid=5405 realUid=10234 "
+                "packageUid=10234 definingUid=10234 user=0\n"
+                "          process=com.example.app reason=1 (EXIT_SELF) "
+                "subreason=0 (UNKNOWN) status=0\n"
+                "          importance=200 pss=12MB rss=48MB state=empty "
+                "trace=/data/anr/trace_5405\n"
+                "          description=null\n"
+                "          anrInfo=null\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=60.0,
+        )
+        # `adb shell dumpsys gfxinfo <package> framestats` — the per-process
+        # summary block get_frame_stats parses (totals, jank, percentiles, the
+        # "Number <x>:" counters, HISTOGRAM). Transcribed/trimmed from live
+        # car-AVD output. A not-running package prints "No process found for:
+        # <pkg>" (exit 0) — override to simulate.
+        self._gfxinfo_framestats_result = gfxinfo_framestats_result or CommandResult(
+            stdout=(
+                "Applications Graphics Acceleration Info:\n"
+                "Uptime: 11367436 Realtime: 11367436\n"
+                "\n"
+                "** Graphics info for pid 1224 [com.example.app] **\n"
+                "\n"
+                "Stats since: 11900917072ns\n"
+                "Total frames rendered: 728\n"
+                "Janky frames: 164 (22.53%)\n"
+                "Janky frames (legacy): 116 (15.93%)\n"
+                "50th percentile: 7ms\n"
+                "90th percentile: 23ms\n"
+                "95th percentile: 31ms\n"
+                "99th percentile: 400ms\n"
+                "Number Missed Vsync: 14\n"
+                "Number High input latency: 211\n"
+                "Number Slow UI thread: 16\n"
+                "Number Slow bitmap uploads: 0\n"
+                "Number Slow issue draw commands: 142\n"
+                "Number Frame deadline missed: 164\n"
+                "Number Frame deadline missed (legacy): 59\n"
+                "HISTOGRAM: 5ms=291 6ms=50 7ms=30 8ms=13 16ms=107 400ms=2\n"
+                "50th gpu percentile: 2ms\n"
+                "90th gpu percentile: 16ms\n"
+                "\n"
+                "Pipeline=Skia (OpenGL)\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=70.0,
+        )
+        # `adb shell dumpsys gfxinfo <package> reset` — reprints the (now
+        # zeroed) gfxinfo dump, exit 0. Success is read from the exit code.
+        self._gfxinfo_reset_result = gfxinfo_reset_result or CommandResult(
+            stdout=(
+                "** Graphics info for pid 1224 [com.example.app] **\n"
+                "\n"
+                "Stats since: 11386291000ns\n"
+                "Total frames rendered: 0\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=60.0,
+        )
+        # `adb shell perfetto -o <file> -t <N>s -b 32mb <cats...>` — verified
+        # live on a car AVD: a "No PTY" warning then "Wrote <N> bytes into
+        # <path>", exit 0. perfetto missing/denied surfaces on stderr at a
+        # non-zero exit — override to simulate.
+        self._perfetto_result = perfetto_result or CommandResult(
+            stdout="",
+            stderr=(
+                "Warning: No PTY.\n"
+                "[427.116]    perfetto_cmd.cc:1136 Connected to the Perfetto traced service\n"
+                "[430.191]    perfetto_cmd.cc:1293 Wrote 84260 bytes into "
+                "/data/misc/perfetto-traces/trace.perfetto-trace\n"
+            ),
+            exit_code=0,
+            duration_ms=3200.0,
+        )
+        # None (the default) means bugreport() writes a stub zip at the path it
+        # is given and reports it — see bugreport() below. A fixed override is
+        # for simulating a failure.
+        self._bugreport_result = bugreport_result
         # None (the default) means "build a realistic success message from
         # whatever remote_path is actually pulled" — see pull() below, same
         # convention as connect_result. Real, long-stable `adb pull` wording.
@@ -1611,6 +1722,14 @@ class FakeBackend:
             return self._procstats_result
         if command.startswith("am dumpheap "):
             return self._am_dumpheap_result
+        if command.startswith("dumpsys activity exit-info"):
+            return self._activity_exit_info_result
+        if command.startswith("dumpsys gfxinfo ") and command.endswith(" reset"):
+            return self._gfxinfo_reset_result
+        if command.startswith("dumpsys gfxinfo "):
+            return self._gfxinfo_framestats_result
+        if command.startswith("perfetto "):
+            return self._perfetto_result
         if command.startswith("dumpsys dropbox --print system_app_anr"):
             return self._dropbox_system_anr_result
         if command.startswith("dumpsys dropbox"):
@@ -1719,3 +1838,22 @@ class FakeBackend:
     async def reboot(self, serial: str, mode: str | None = None) -> CommandResult:
         self._raise_if_unavailable()
         return self._reboot_result
+
+    async def bugreport(
+        self, serial: str, local_path: str, timeout_s: float | None = None
+    ) -> CommandResult:
+        self._raise_if_unavailable()
+        if self._bugreport_result is not None:
+            return self._bugreport_result
+        # Mirror modern `adb bugreport`: it lands a zip at <local_path> (adding
+        # ".zip" if the path has no suffix) and prints where it went. Write a
+        # tiny stub so artifact-path/size assertions have a real file.
+        target = Path(local_path)
+        if target.suffix == "":
+            target = target.with_suffix(".zip")
+        with suppress(OSError):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"PK\x03\x04 fake-bugreport-zip")
+        return CommandResult(
+            stdout=f"Bug report copied to {target}\n", stderr="", exit_code=0, duration_ms=4000.0
+        )

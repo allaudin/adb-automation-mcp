@@ -6,12 +6,16 @@ registers at server startup.
 from __future__ import annotations
 
 from adb_automation_mcp.modules.ui.service import UiService
-from adb_automation_mcp.modules.ui.tools import dump_ui_hierarchy
+from adb_automation_mcp.modules.ui.tools import (
+    dump_ui_hierarchy,
+    find_ui_elements,
+    wait_for_ui_element,
+)
 from adb_automation_mcp.registry import ModuleManifest
 
 MODULE = ModuleManifest(
     name="ui",
     service_factory=UiService,
-    tools=[dump_ui_hierarchy],
+    tools=[dump_ui_hierarchy, find_ui_elements, wait_for_ui_element],
     resources=[],
 )

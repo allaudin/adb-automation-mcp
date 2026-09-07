@@ -141,3 +141,83 @@ async def test_get_setting_tool_adb_failure_returns_device_not_found_error() -> 
     assert result.data.status == "error"
     assert result.data.error is not None
     assert result.data.error.code == "DEVICE_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_set_setting_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "set_setting",
+            {
+                "serial": "emulator-5554",
+                "namespace": "system",
+                "key": "screen_brightness",
+                "value": "200",
+            },
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.namespace == "system"
+    assert result.data.data.requested_value == "200"
+    assert result.data.data.previous_value == "128"
+    assert result.data.data.new_value == "200"
+    assert result.data.data.changed is True
+
+
+@pytest.mark.asyncio
+async def test_set_setting_tool_invalid_namespace_rejected_before_execution() -> None:
+    captured: dict[str, str] = {}
+
+    class RecordingBackend(FakeBackend):
+        async def shell(
+            self, serial: str, command: str, timeout_s: float | None = None
+        ) -> CommandResult:
+            captured["command"] = command
+            return await super().shell(serial, command, timeout_s)
+
+    mcp = _build_test_server(RecordingBackend())
+
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError):
+            await client.call_tool(
+                "set_setting",
+                {
+                    "serial": "emulator-5554",
+                    "namespace": "bogus",
+                    "key": "screen_brightness",
+                    "value": "1",
+                },
+            )
+
+    assert "command" not in captured
+
+
+@pytest.mark.asyncio
+async def test_set_setting_tool_protected_setting_returns_permission_denied() -> None:
+    mcp = _build_test_server(
+        FakeBackend(
+            set_setting_result=CommandResult(
+                stdout="",
+                stderr="java.lang.SecurityException: Permission denial\n",
+                exit_code=255,
+                duration_ms=20.0,
+            )
+        )
+    )
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "set_setting",
+            {
+                "serial": "emulator-5554",
+                "namespace": "secure",
+                "key": "protected_key",
+                "value": "1",
+            },
+        )
+
+    assert result.data.status == "error"
+    assert result.data.error is not None
+    assert result.data.error.code == "PERMISSION_DENIED"

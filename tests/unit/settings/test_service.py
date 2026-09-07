@@ -8,7 +8,12 @@ import pytest
 
 from adb_automation_mcp.backend.protocol import CommandResult
 from adb_automation_mcp.backend.testing import FakeBackend
-from adb_automation_mcp.errors import BackendError, DeviceNotFoundError, PermissionDeniedError
+from adb_automation_mcp.errors import (
+    AndroidRejectionError,
+    BackendError,
+    DeviceNotFoundError,
+    PermissionDeniedError,
+)
 from adb_automation_mcp.modules.settings.service import SettingsService
 
 
@@ -125,3 +130,139 @@ async def test_get_setting__unclassified_failure_raises_backend_error() -> None:
 
     with pytest.raises(BackendError):
         await service.get_setting("emulator-5554", "system", "screen_brightness")
+
+
+@pytest.mark.asyncio
+async def test_set_setting__round_trip_reports_previous_and_new_value() -> None:
+    commands: list[str] = []
+
+    class RecordingBackend(FakeBackend):
+        async def shell(
+            self, serial: str, command: str, timeout_s: float | None = None
+        ) -> CommandResult:
+            commands.append(command)
+            return await super().shell(serial, command, timeout_s)
+
+    # get before -> 128 (default fixture), put stores, get after -> the value put.
+    service = SettingsService(RecordingBackend())
+
+    result = await service.set_setting("emulator-5554", "system", "screen_brightness", "200")
+
+    assert commands == [
+        "settings get system screen_brightness",
+        "settings put system screen_brightness 200",
+        "settings get system screen_brightness",
+    ]
+    assert result.serial == "emulator-5554"
+    assert result.namespace == "system"
+    assert result.key == "screen_brightness"
+    assert result.requested_value == "200"
+    assert result.previous_value == "128"
+    assert result.new_value == "200"
+    assert result.changed is True
+
+
+@pytest.mark.asyncio
+async def test_set_setting__unchanged_when_value_already_matches() -> None:
+    backend = FakeBackend(
+        get_setting_result=CommandResult(stdout="200\n", stderr="", exit_code=0, duration_ms=10.0)
+    )
+    service = SettingsService(backend)
+
+    result = await service.set_setting("emulator-5554", "system", "screen_brightness", "200")
+
+    assert result.previous_value == "200"
+    assert result.new_value == "200"
+    assert result.changed is False
+
+
+@pytest.mark.asyncio
+async def test_set_setting__sends_user_id_flag_on_both_get_and_put() -> None:
+    commands: list[str] = []
+
+    class RecordingBackend(FakeBackend):
+        async def shell(
+            self, serial: str, command: str, timeout_s: float | None = None
+        ) -> CommandResult:
+            commands.append(command)
+            return await super().shell(serial, command, timeout_s)
+
+    service = SettingsService(RecordingBackend())
+
+    result = await service.set_setting(
+        "emulator-5554", "secure", "location_mode", "3", user_id=10
+    )
+
+    assert commands == [
+        "settings --user 10 get secure location_mode",
+        "settings --user 10 put secure location_mode 3",
+        "settings --user 10 get secure location_mode",
+    ]
+    assert result.user_id == 10
+    assert result.new_value == "3"
+
+
+@pytest.mark.asyncio
+async def test_set_setting__value_is_shell_quoted() -> None:
+    commands: list[str] = []
+
+    class RecordingBackend(FakeBackend):
+        async def shell(
+            self, serial: str, command: str, timeout_s: float | None = None
+        ) -> CommandResult:
+            commands.append(command)
+            return await super().shell(serial, command, timeout_s)
+
+    service = SettingsService(RecordingBackend())
+
+    await service.set_setting("emulator-5554", "system", "some_key", "a b;c")
+
+    assert "settings put system some_key 'a b;c'" in commands
+
+
+@pytest.mark.asyncio
+async def test_set_setting__security_exception_raises_permission_denied() -> None:
+    backend = FakeBackend(
+        set_setting_result=CommandResult(
+            stdout="",
+            stderr="java.lang.SecurityException: Permission denial: writing to settings\n",
+            exit_code=255,
+            duration_ms=20.0,
+        )
+    )
+    service = SettingsService(backend)
+
+    with pytest.raises(PermissionDeniedError):
+        await service.set_setting("emulator-5554", "secure", "protected_key", "1")
+
+
+@pytest.mark.asyncio
+async def test_set_setting__provider_exception_raises_android_rejected() -> None:
+    backend = FakeBackend(
+        set_setting_result=CommandResult(
+            stdout="",
+            stderr=(
+                "Exception occurred while executing 'put':\n"
+                "  at com.android.providers.settings.SettingsService.onCommand\n"
+            ),
+            exit_code=255,
+            duration_ms=20.0,
+        )
+    )
+    service = SettingsService(backend)
+
+    with pytest.raises(AndroidRejectionError):
+        await service.set_setting("emulator-5554", "system", "bad_key", "x")
+
+
+@pytest.mark.asyncio
+async def test_set_setting__unknown_serial_raises_device_not_found() -> None:
+    backend = FakeBackend(
+        get_setting_result=CommandResult(
+            stdout="", stderr="adb: device 'bogus' not found\n", exit_code=1, duration_ms=10.0
+        )
+    )
+    service = SettingsService(backend)
+
+    with pytest.raises(DeviceNotFoundError):
+        await service.set_setting("bogus", "system", "screen_brightness", "1")

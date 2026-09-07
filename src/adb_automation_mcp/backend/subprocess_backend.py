@@ -116,8 +116,14 @@ class SubprocessBackend:
         # other slow command.
         return await self._run("-s", serial, wait_token, timeout_s=timeout_s)
 
-    async def shell(self, serial: str, command: str) -> CommandResult:
-        return await self._run("-s", serial, "shell", command)
+    async def shell(
+        self, serial: str, command: str, timeout_s: float | None = None
+    ) -> CommandResult:
+        # timeout_s overrides the backend default for this one call — used by
+        # long-running shell commands the 10s default would kill mid-flight
+        # (e.g. the screen module's record_screen, which blocks for the whole
+        # requested recording duration).
+        return await self._run("-s", serial, "shell", command, timeout_s=timeout_s)
 
     async def exec_out(self, serial: str, command: str) -> ExecOutResult:
         return await self._run_bytes("-s", serial, "exec-out", command)

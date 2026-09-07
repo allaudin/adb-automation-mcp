@@ -8,9 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from adb_automation_mcp.backend.protocol import ExecOutResult
+from adb_automation_mcp.backend.protocol import CommandResult, ExecOutResult
 from adb_automation_mcp.backend.testing import FakeBackend
 from adb_automation_mcp.errors import (
+    AdbTimeoutError,
     BackendError,
     DeviceNotFoundError,
     InvalidArgumentError,
@@ -170,3 +171,179 @@ async def test_take_screenshot__screencap_error_on_stdout_with_exit_0_raises_bac
     with pytest.raises(BackendError, match="Failed to take screenshot"):
         await ScreenService(backend, local_root=tmp_path).take_screenshot("emulator-5554", display_id=999)
     assert not (tmp_path / "screenshots").exists()
+
+
+# --- record_screen -----------------------------------------------------------
+
+
+class _RecordingBackend(FakeBackend):
+    """Captures every shell command and the pull args; writes real bytes to
+    the pull destination so size_bytes is exercised.
+    """
+
+    def __init__(self, screenrecord_result: CommandResult | None = None) -> None:
+        super().__init__(screenrecord_result=screenrecord_result)
+        self.commands: list[str] = []
+        self.shell_timeouts: list[float | None] = []
+        self.pulled: tuple[str, str, str] | None = None
+
+    async def shell(
+        self, serial: str, command: str, timeout_s: float | None = None
+    ) -> CommandResult:
+        self.commands.append(command)
+        self.shell_timeouts.append(timeout_s)
+        return await super().shell(serial, command, timeout_s)
+
+    async def pull(self, serial: str, remote_path: str, local_path: str) -> CommandResult:
+        self.pulled = (serial, remote_path, local_path)
+        Path(local_path).write_bytes(b"\x00\x00\x00\x18ftypmp42fake-mp4-body")
+        return await super().pull(serial, remote_path, local_path)
+
+
+@pytest.mark.asyncio
+async def test_record_screen__default_command_pull_and_cleanup(tmp_path: Path) -> None:
+    backend = _RecordingBackend()
+
+    result = await ScreenService(backend, local_root=tmp_path).record_screen(
+        "emulator-5554", duration_s=5, filename="run1"
+    )
+
+    record_cmd = backend.commands[0]
+    assert record_cmd.startswith("screenrecord --time-limit 5 ")
+    assert "--size" not in record_cmd
+    assert "--bit-rate" not in record_cmd
+    assert "/data/local/tmp/adb_automation_mcp_screenrecord_" in record_cmd
+    # shell timeout must exceed the requested duration.
+    assert backend.shell_timeouts[0] is not None and backend.shell_timeouts[0] > 5
+
+    saved = tmp_path / "recordings" / "run1.mp4"
+    assert result.local_path == str(saved)
+    assert result.duration_s == 5
+    assert result.success is True
+    assert result.size_bytes == saved.stat().st_size
+    assert saved.exists()
+
+    # temp file removed on the way out
+    assert backend.commands[-1].startswith("rm -f /data/local/tmp/adb_automation_mcp_screenrecord_")
+
+
+@pytest.mark.asyncio
+async def test_record_screen__maps_size_bitrate_bugreport_verbose(tmp_path: Path) -> None:
+    backend = _RecordingBackend()
+
+    await ScreenService(backend, local_root=tmp_path).record_screen(
+        "emulator-5554",
+        duration_s=3,
+        size="1280x720",
+        bit_rate_mbps=4,
+        bugreport=True,
+        verbose=True,
+    )
+
+    cmd = backend.commands[0]
+    assert "--size 1280x720" in cmd
+    assert "--bit-rate 4000000" in cmd
+    assert "--bugreport" in cmd
+    assert "--verbose" in cmd
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_duration", [0, -1, 181, 600])
+async def test_record_screen__duration_out_of_range_rejected(tmp_path: Path, bad_duration: int) -> None:
+    backend = _RecordingBackend()
+
+    with pytest.raises(InvalidArgumentError):
+        await ScreenService(backend, local_root=tmp_path).record_screen(
+            "emulator-5554", duration_s=bad_duration
+        )
+    assert backend.commands == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_size", ["1280", "1280*720", "widexhigh", "x720"])
+async def test_record_screen__malformed_size_rejected(tmp_path: Path, bad_size: str) -> None:
+    backend = _RecordingBackend()
+
+    with pytest.raises(InvalidArgumentError):
+        await ScreenService(backend, local_root=tmp_path).record_screen(
+            "emulator-5554", duration_s=5, size=bad_size
+        )
+    assert backend.commands == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_rate", [0, -2, 250])
+async def test_record_screen__bad_bit_rate_rejected(tmp_path: Path, bad_rate: float) -> None:
+    backend = _RecordingBackend()
+
+    with pytest.raises(InvalidArgumentError):
+        await ScreenService(backend, local_root=tmp_path).record_screen(
+            "emulator-5554", duration_s=5, bit_rate_mbps=bad_rate
+        )
+    assert backend.commands == []
+
+
+@pytest.mark.asyncio
+async def test_record_screen__no_local_root_raises_policy_violation() -> None:
+    with pytest.raises(PolicyViolationError):
+        await ScreenService(FakeBackend()).record_screen("emulator-5554", duration_s=5)
+
+
+@pytest.mark.asyncio
+async def test_record_screen__filename_with_separator_rejected(tmp_path: Path) -> None:
+    with pytest.raises(InvalidArgumentError):
+        await ScreenService(FakeBackend(), local_root=tmp_path).record_screen(
+            "emulator-5554", duration_s=5, filename="../escape.mp4"
+        )
+
+
+@pytest.mark.asyncio
+async def test_record_screen__screenrecord_failure_raises_backend_error_and_cleans_up(
+    tmp_path: Path,
+) -> None:
+    backend = _RecordingBackend(
+        screenrecord_result=CommandResult(
+            stdout="",
+            stderr="Unable to get IGraphicBufferProducer\n",
+            exit_code=1,
+            duration_ms=20.0,
+        )
+    )
+
+    with pytest.raises(BackendError):
+        await ScreenService(backend, local_root=tmp_path).record_screen("emulator-5554", duration_s=5)
+
+    assert backend.pulled is None  # never tried to pull a file that wasn't made
+    assert backend.commands[-1].startswith("rm -f /data/local/tmp/adb_automation_mcp_screenrecord_")
+
+
+@pytest.mark.asyncio
+async def test_record_screen__unknown_serial_raises_device_not_found(tmp_path: Path) -> None:
+    backend = _RecordingBackend(
+        screenrecord_result=CommandResult(
+            stdout="", stderr="adb: device 'bogus' not found\n", exit_code=1, duration_ms=5.0
+        )
+    )
+
+    with pytest.raises(DeviceNotFoundError):
+        await ScreenService(backend, local_root=tmp_path).record_screen("bogus", duration_s=5)
+
+
+@pytest.mark.asyncio
+async def test_record_screen__timeout_propagates_as_adb_timeout(tmp_path: Path) -> None:
+    class TimingOutBackend(_RecordingBackend):
+        async def shell(
+            self, serial: str, command: str, timeout_s: float | None = None
+        ) -> CommandResult:
+            self.commands.append(command)
+            if command.startswith("screenrecord "):
+                raise AdbTimeoutError("adb command timed out.", details={"command": command})
+            return await FakeBackend.shell(self, serial, command, timeout_s)
+
+    backend = TimingOutBackend()
+
+    with pytest.raises(AdbTimeoutError):
+        await ScreenService(backend, local_root=tmp_path).record_screen("emulator-5554", duration_s=5)
+
+    # cleanup still runs
+    assert backend.commands[-1].startswith("rm -f /data/local/tmp/adb_automation_mcp_screenrecord_")

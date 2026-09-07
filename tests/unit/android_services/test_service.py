@@ -19,6 +19,7 @@ from adb_automation_mcp.errors import (
 )
 from adb_automation_mcp.modules.android_services.service import (
     AndroidServicesService,
+    ServiceStatus,
     StartForegroundServiceResult,
     StopServiceResult,
 )
@@ -546,3 +547,195 @@ def test_stop_service_result_summary_variants() -> None:
         output="",
     ).summary()
     assert "was not running" in not_running
+
+
+# --- get_service_status ---------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_service_status__constructs_command_and_parses_two_user_instances() -> None:
+    backend = _ShellRecordingBackend()
+    service = AndroidServicesService(backend)
+
+    status = await service.get_service_status("emulator-5554", "com.example.app/.MyFgService")
+
+    assert backend.last_shell_command == (
+        "dumpsys activity services com.example.app/.MyFgService"
+    )
+    assert isinstance(status, ServiceStatus)
+    assert status.running is True
+    assert [i.user_id for i in status.instances] == [0, 10]
+    u0 = status.instances[0]
+    assert u0.pid == 1884
+    assert u0.process_name == "com.example.app"
+    assert u0.package_name == "com.example.app"
+    assert u0.is_foreground is True
+    assert u0.foreground_id == 1
+    assert u0.start_requested is True
+    assert u0.last_start_id == 2
+    assert u0.created_from_fg is False
+    assert u0.start_foreground_count == 1
+
+
+@pytest.mark.asyncio
+async def test_get_service_status__second_instance_non_foreground_fields() -> None:
+    service = AndroidServicesService(FakeBackend())
+
+    status = await service.get_service_status("emulator-5554", "com.example.app/.MyFgService")
+
+    u10 = status.instances[1]
+    assert u10.user_id == 10
+    assert u10.pid == 1885
+    assert u10.is_foreground is False
+    assert u10.foreground_id is None
+    assert u10.created_from_fg is True
+    assert u10.last_start_id == 1
+
+
+@pytest.mark.asyncio
+async def test_get_service_status__no_services_match_is_running_false_not_error() -> None:
+    backend = FakeBackend(
+        dumpsys_activity_services_result=CommandResult(
+            stdout="No services match: com.example.nope/.NoService\nUse -h for help.\n",
+            stderr="",
+            exit_code=0,
+            duration_ms=5.0,
+        )
+    )
+    service = AndroidServicesService(backend)
+
+    status = await service.get_service_status("emulator-5554", "com.example.nope/.NoService")
+
+    assert status.running is False
+    assert status.instances == []
+
+
+@pytest.mark.asyncio
+async def test_get_service_status__malformed_component_is_running_false_not_error() -> None:
+    backend = FakeBackend(
+        dumpsys_activity_services_result=CommandResult(
+            stdout="No services match: notacomponent\nUse -h for help.\n",
+            stderr="",
+            exit_code=0,
+            duration_ms=5.0,
+        )
+    )
+    service = AndroidServicesService(backend)
+
+    status = await service.get_service_status("emulator-5554", "notacomponent")
+
+    assert status.running is False
+
+
+@pytest.mark.asyncio
+async def test_get_service_status__app_null_gives_pid_none() -> None:
+    backend = FakeBackend(
+        dumpsys_activity_services_result=CommandResult(
+            stdout=(
+                "  User 0 active services:\n"
+                "  * ServiceRecord{aa u0 com.example.app/.MyService c:android}\n"
+                "    packageName=com.example.app\n"
+                "    app=null\n"
+                "    startRequested=true\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=5.0,
+        )
+    )
+    service = AndroidServicesService(backend)
+
+    status = await service.get_service_status("emulator-5554", "com.example.app/.MyService")
+
+    assert status.running is True
+    assert status.instances[0].pid is None
+    assert status.instances[0].start_requested is True
+
+
+@pytest.mark.asyncio
+async def test_get_service_status__empty_component_rejected_before_backend() -> None:
+    backend = _ShellRecordingBackend()
+    service = AndroidServicesService(backend)
+
+    with pytest.raises(InvalidArgumentError):
+        await service.get_service_status("emulator-5554", "  ")
+
+    assert backend.last_shell_command is None
+
+
+@pytest.mark.asyncio
+async def test_get_service_status__unknown_serial_raises_device_not_found() -> None:
+    backend = FakeBackend(
+        dumpsys_activity_services_result=CommandResult(
+            stdout="", stderr="adb: device 'bogus' not found\n", exit_code=1, duration_ms=5.0
+        )
+    )
+    service = AndroidServicesService(backend)
+
+    with pytest.raises(DeviceNotFoundError):
+        await service.get_service_status("bogus", "com.example.app/.MyService")
+
+
+@pytest.mark.asyncio
+async def test_get_service_status__nonzero_exit_raises_backend_error() -> None:
+    backend = FakeBackend(
+        dumpsys_activity_services_result=CommandResult(
+            stdout="", stderr="Can't find service: activity\n", exit_code=1, duration_ms=5.0
+        )
+    )
+    service = AndroidServicesService(backend)
+
+    with pytest.raises(BackendError):
+        await service.get_service_status("emulator-5554", "com.example.app/.MyService")
+
+
+@pytest.mark.asyncio
+async def test_get_service_status__garbage_output_parses_to_running_false() -> None:
+    backend = FakeBackend(
+        dumpsys_activity_services_result=CommandResult(
+            stdout="totally unrecognizable\n", stderr="", exit_code=0, duration_ms=5.0
+        )
+    )
+    service = AndroidServicesService(backend)
+
+    status = await service.get_service_status("emulator-5554", "com.example.app/.MyService")
+
+    assert status.running is False
+
+
+@pytest.mark.asyncio
+async def test_get_service_status__adb_unavailable_propagates() -> None:
+    service = AndroidServicesService(FakeBackend(unavailable=True))
+
+    with pytest.raises(AdbUnavailableError):
+        await service.get_service_status("emulator-5554", "com.example.app/.MyService")
+
+
+def test_service_status_summary_variants() -> None:
+    from adb_automation_mcp.modules.android_services.service import ServiceInstance
+
+    assert "is not running" in ServiceStatus(
+        serial="emulator-5554", component="com.x/.Y", running=False, instances=[]
+    ).summary()
+
+    s = ServiceStatus(
+        serial="emulator-5554",
+        component="com.x/.Y",
+        running=True,
+        instances=[
+            ServiceInstance(
+                user_id=0,
+                pid=1,
+                process_name="p",
+                package_name="com.x",
+                is_foreground=True,
+                foreground_id=1,
+                start_requested=True,
+                last_start_id=1,
+                created_from_fg=False,
+                start_foreground_count=1,
+            )
+        ],
+    ).summary()
+    assert "1 instance(s)" in s
+    assert "1 foreground" in s

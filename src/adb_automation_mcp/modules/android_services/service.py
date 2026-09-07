@@ -102,13 +102,87 @@ class StopServiceResult(BaseModel):
         return f"Service {self.component} on {self.serial}: stop dispatched, outcome unrecognized."
 
 
+class ServiceInstance(BaseModel):
+    """One running instance of a Service (there's one per Android user it's
+    active for), parsed from a `dumpsys activity services` ServiceRecord block.
+    Any field this Android version's dump omits is null.
+    """
+
+    user_id: int
+    pid: int | None
+    process_name: str | None
+    package_name: str | None
+    is_foreground: bool | None
+    foreground_id: int | None
+    start_requested: bool | None
+    last_start_id: int | None
+    created_from_fg: bool | None
+    start_foreground_count: int | None
+
+
+class ServiceStatus(BaseModel):
+    """A focused status snapshot for one Service component
+    (`dumpsys activity services <component>`).
+
+    running is False — with an empty instances list — when the service is not
+    active anywhere; `dumpsys` reports that ("No services match: ...") and still
+    exits 0, so it's a normal result, not an error. `dumpsys activity services`
+    can't distinguish a stopped service from an unknown/malformed component, so
+    none of those raise here.
+    """
+
+    serial: str
+    component: str
+    running: bool
+    instances: list[ServiceInstance]
+
+    def summary(self) -> str:
+        if not self.running:
+            return f"Service {self.component} is not running on {self.serial}."
+        fg = sum(1 for i in self.instances if i.is_foreground)
+        return (
+            f"{self.component} is running on {self.serial}: {len(self.instances)} instance(s)"
+            + (f", {fg} foreground" if fg else "")
+            + "."
+        )
+
+
 class AndroidServicesService:
-    """Starts Android services (ordinary and foreground) and stops them on a
-    connected device.
+    """Starts Android services (ordinary and foreground), stops them, and
+    reports one Service's status on a connected device.
     """
 
     def __init__(self, backend: AdbBackend) -> None:
         self._backend = backend
+
+    async def get_service_status(
+        self, serial: str, component: str
+    ) -> ServiceStatus:
+        if not component.strip():
+            raise InvalidArgumentError(
+                "component must not be empty.", details={"serial": serial}
+            )
+
+        result = await self._backend.shell(
+            serial, f"dumpsys activity services {shlex.quote(component)}"
+        )
+        if result.exit_code != 0:
+            message = (
+                result.stderr or result.stdout
+            ).strip() or "dumpsys activity services exited non-zero."
+            if message.startswith("adb:") and "not found" in message:
+                raise DeviceNotFoundError(message, details={"serial": serial})
+            raise BackendError(
+                message, details={"serial": serial, "component": component, "exit_code": result.exit_code}
+            )
+
+        instances = _parse_service_records(result.stdout)
+        return ServiceStatus(
+            serial=serial,
+            component=component,
+            running=bool(instances),
+            instances=instances,
+        )
 
     async def stop_service(
         self, serial: str, component: str, user_id: int | None = None
@@ -281,3 +355,57 @@ def _first_line_containing(text: str, needle: str) -> str:
 
 _ERROR_LINE_RE = re.compile(r"^Error:\s*(?P<message>.+)$", re.MULTILINE)
 _REQUIRES_PERMISSION_RE = re.compile(r"^Requires permission (.+)$")
+
+_SERVICE_RECORD_RE = re.compile(r"ServiceRecord\{[0-9a-f]+ u(?P<uid>\d+) (?P<comp>\S+) ")
+_APP_PROC_RE = re.compile(r"app=ProcessRecord\{[0-9a-f]+ (?P<pid>\d+):")
+_KV_TOKEN_RE = re.compile(r"(\w+)=(\S+)")
+
+
+def _parse_bool(value: str | None) -> bool | None:
+    return None if value is None else value == "true"
+
+
+def _parse_int(value: str | None) -> int | None:
+    if value is None or not value.lstrip("-").isdigit():
+        return None
+    return int(value)
+
+
+def _parse_service_records(stdout: str) -> list[ServiceInstance]:
+    """Split `dumpsys activity services <component>` into per-ServiceRecord
+    blocks and pull the stable status fields out of each.
+    """
+    lines = stdout.splitlines()
+    starts = [i for i, ln in enumerate(lines) if _SERVICE_RECORD_RE.search(ln)]
+    instances: list[ServiceInstance] = []
+    for idx, start in enumerate(starts):
+        end = starts[idx + 1] if idx + 1 < len(starts) else len(lines)
+        block = lines[start:end]
+        header = _SERVICE_RECORD_RE.search(block[0])
+        if header is None:
+            continue
+
+        kv: dict[str, str] = {}
+        pid: int | None = None
+        for raw in block:
+            app = _APP_PROC_RE.search(raw)
+            if app is not None:
+                pid = int(app.group("pid"))
+            for key, val in _KV_TOKEN_RE.findall(raw):
+                kv.setdefault(key, val)  # first occurrence wins
+
+        instances.append(
+            ServiceInstance(
+                user_id=int(header.group("uid")),
+                pid=pid,
+                process_name=kv.get("processName"),
+                package_name=kv.get("packageName"),
+                is_foreground=_parse_bool(kv.get("isForeground")),
+                foreground_id=_parse_int(kv.get("foregroundId")),
+                start_requested=_parse_bool(kv.get("startRequested")),
+                last_start_id=_parse_int(kv.get("lastStartId")),
+                created_from_fg=_parse_bool(kv.get("createdFromFg")),
+                start_foreground_count=_parse_int(kv.get("startForegroundCount")),
+            )
+        )
+    return instances

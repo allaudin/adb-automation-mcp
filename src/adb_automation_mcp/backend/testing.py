@@ -120,6 +120,7 @@ class FakeBackend:
         start_service_result: CommandResult | None = None,
         start_foreground_service_result: CommandResult | None = None,
         stop_service_result: CommandResult | None = None,
+        dumpsys_activity_services_result: CommandResult | None = None,
         force_stop_result: CommandResult | None = None,
         pull_result: CommandResult | None = None,
         forward_result: CommandResult | None = None,
@@ -618,6 +619,45 @@ class FakeBackend:
             exit_code=0,
             duration_ms=110.0,
         )
+        # `adb shell dumpsys activity services <component>` — the filtered
+        # "User N active services:" / "* ServiceRecord{<hash> uN <component>
+        # c:...}" blocks, trimmed to the fields get_service_status parses. Field
+        # shapes (packageName=, processName=, app=ProcessRecord{<pid>:pkg/uid},
+        # isForeground=... foregroundId=..., startForegroundCount=,
+        # startRequested=... callStart=... lastStartId=, createdFromFg=) are
+        # transcribed from live car-AVD output for a foreground service. An
+        # unknown/absent service prints "No services match: <component>" and
+        # still exits 0 — see AndroidServicesService.get_service_status.
+        self._dumpsys_activity_services_result = dumpsys_activity_services_result or CommandResult(
+            stdout=(
+                "ACTIVITY MANAGER SERVICES (dumpsys activity services)\n"
+                "  User 0 active services:\n"
+                "  * ServiceRecord{700fb2f u0 com.example.app/.MyFgService c:com.example.app}\n"
+                "    intent={cmp=com.example.app/.MyFgService}\n"
+                "    packageName=com.example.app\n"
+                "    processName=com.example.app\n"
+                "    app=ProcessRecord{7ff9d4b 1884:com.example.app/u0a61}\n"
+                "    startForegroundCount=1\n"
+                "    isForeground=true foregroundId=1 types=0x00000008 "
+                "foregroundNoti=Notification(channel=default)\n"
+                "    createTime=-9h37m29s140ms startingBgTimeout=--\n"
+                "    lastActivity=-9h37m29s87ms restartTime=-9h37m29s138ms createdFromFg=false\n"
+                "    startRequested=true delayedStop=false stopIfKilled=false callStart=true "
+                "lastStartId=2\n"
+                "\n"
+                "  User 10 active services:\n"
+                "  * ServiceRecord{e0b3c75 u10 com.example.app/.MyFgService c:com.example.app}\n"
+                "    packageName=com.example.app\n"
+                "    processName=com.example.app\n"
+                "    app=ProcessRecord{1a2b3c 1885:com.example.app/u10a61}\n"
+                "    isForeground=false\n"
+                "    startRequested=true callStart=true lastStartId=1\n"
+                "    createdFromFg=true\n"
+            ),
+            stderr="",
+            exit_code=0,
+            duration_ms=170.0,
+        )
         # `adb shell am force-stop` — the well-documented, long-stable AOSP
         # behavior: no stdout at all on success. Not captured from a live
         # device in this environment (none was available); same caveat as
@@ -949,6 +989,8 @@ class FakeBackend:
             return self._start_foreground_service_result
         if command.startswith("am stop-service "):
             return self._stop_service_result
+        if command.startswith("dumpsys activity services "):
+            return self._dumpsys_activity_services_result
         if command.startswith("cmd package resolve-activity"):
             return self._resolve_activity_result
         if command == "dumpsys activity activities":

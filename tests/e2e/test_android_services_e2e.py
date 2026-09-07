@@ -304,3 +304,80 @@ async def test_stop_service_tool_is_registered() -> None:
         names = {tool.name for tool in await client.list_tools()}
 
     assert "stop_service" in names
+
+
+# --- get_service_status --------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_service_status_tool_round_trips_over_mcp_protocol() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "get_service_status",
+            {"serial": "emulator-5554", "component": "com.example.app/.MyFgService"},
+        )
+
+    assert result.data.status == "success"
+    d = result.data.data
+    assert d.running is True
+    assert [i.user_id for i in d.instances] == [0, 10]
+    assert d.instances[0].pid == 1884
+    assert d.instances[0].is_foreground is True
+    assert d.instances[0].start_foreground_count == 1
+    assert d.instances[1].is_foreground is False
+
+
+@pytest.mark.asyncio
+async def test_get_service_status_tool_not_running_serializes_as_running_false() -> None:
+    mcp = _build_test_server(
+        FakeBackend(
+            dumpsys_activity_services_result=CommandResult(
+                stdout="No services match: com.example.nope/.NoService\nUse -h for help.\n",
+                stderr="",
+                exit_code=0,
+                duration_ms=5.0,
+            )
+        )
+    )
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "get_service_status",
+            {"serial": "emulator-5554", "component": "com.example.nope/.NoService"},
+        )
+
+    assert result.data.status == "success"
+    assert result.data.data.running is False
+    assert result.data.data.instances == []
+
+
+@pytest.mark.asyncio
+async def test_get_service_status_tool_unknown_serial_returns_device_not_found() -> None:
+    mcp = _build_test_server(
+        FakeBackend(
+            dumpsys_activity_services_result=CommandResult(
+                stdout="", stderr="adb: device 'bogus' not found\n", exit_code=1, duration_ms=5.0
+            )
+        )
+    )
+
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "get_service_status", {"serial": "bogus", "component": "com.example.app/.MyService"}
+        )
+
+    assert result.data.status == "error"
+    assert result.data.error is not None
+    assert result.data.error.code == "DEVICE_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_get_service_status_tool_is_registered() -> None:
+    mcp = _build_test_server(FakeBackend())
+
+    async with Client(mcp) as client:
+        names = {tool.name for tool in await client.list_tools()}
+
+    assert "get_service_status" in names

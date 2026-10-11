@@ -1,3 +1,8 @@
+---
+title: "System Properties: getprop and setprop"
+description: "MCP tools to read, list, inspect, and set Android system properties via adb getprop and setprop."
+---
+
 # system_properties
 
 Android system properties on a connected device — read, list (optionally by prefix),

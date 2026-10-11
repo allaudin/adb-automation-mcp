@@ -1,3 +1,8 @@
+---
+title: "Content Providers: Query Rows"
+description: "MCP tool to query Android ContentProvider rows with projection, selection, and sort via adb shell content query."
+---
+
 # content
 
 Reading rows from an exported or shell-accessible ContentProvider on a
@@ -7,7 +12,6 @@ and `--user` scope — never a raw argument string — and parses `content`'s
 `Row: N col=val, …` output into structured column→value maps (a value the
 provider rendered as `NULL` comes back as null). An empty result set is a
 valid response; a missing/unexported authority raises
-`CONTENT_PROVIDER_NOT_FOUND`. Inserting, updating and deleting rows aren't
-implemented yet.
+`CONTENT_PROVIDER_NOT_FOUND`.
 
 ::: adb_automation_mcp.modules.content.tools

@@ -1,10 +1,15 @@
+---
+title: "App Data: Clear Data and Cache"
+description: "MCP tools to clear an Android app's full data via adb shell pm clear, or only its cache while leaving data intact."
+---
+
 # app_data
 
-Clearing an installed package's full application data (`adb shell pm clear`)
-on a connected device — its databases, shared preferences, files and cache
-are all wiped, resetting the app to a fresh-install state. This is the
-unscoped `pm clear`; there is no reliable cross-version ADB way to clear
-just the cache (`pm clear --cache-only` is Android 11+ only), so the tool is
-`destructive`-category and only registered when the server opts in.
+Clearing an installed package's data on a connected device.
+`clear_app_data` runs the unscoped `adb shell pm clear`, wiping databases,
+shared preferences, files and cache; it is `destructive` and only registered
+when the server opts in. `clear_app_cache` clears only the cache
+(`pm clear --cache-only` on Android 11+, falling back to removing the cache
+directories as root) and never touches app data.
 
 ::: adb_automation_mcp.modules.app_data.tools

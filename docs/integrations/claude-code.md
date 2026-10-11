@@ -1,3 +1,8 @@
+---
+title: "Use the ADB MCP Server with Claude Code"
+description: "Register adb-automation-mcp with Claude Code using claude mcp add, choose a scope, and verify the Android ADB MCP server is connected."
+---
+
 # Integrating with Claude Code
 
 ```bash

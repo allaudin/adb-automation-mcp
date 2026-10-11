@@ -1,3 +1,8 @@
+---
+title: "Profiling: Method Traces"
+description: "MCP tools to start and stop Android method profiling via adb shell am profile and pull the .trace file to the host."
+---
+
 # profiling
 
 Android method profiling for a process (`adb shell am profile start|stop` +

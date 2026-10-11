@@ -1,3 +1,8 @@
+---
+title: "ADB MCP Server for Android Automation"
+description: "Install and configure adb-automation-mcp, an MCP server that gives Claude and other AI agents typed, policy-controlled tools for Android devices over ADB."
+---
+
 # adb-automation-mcp
 
 An MCP server exposing Android Debug Bridge (ADB) capabilities as typed, documented

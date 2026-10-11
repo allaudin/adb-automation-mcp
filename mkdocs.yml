@@ -1,5 +1,6 @@
 site_name: adb-automation-mcp
-site_description: MCP server exposing Android Debug Bridge (ADB) capabilities as typed, documented tools and resources.
+site_description: MCP server that lets Claude and other AI agents control Android devices over ADB with typed, documented, policy-controlled tools.
+site_author: Allaudin Muhammad
 site_url: https://allaudin.github.io/adb-automation-mcp/
 repo_url: https://github.com/allaudin/adb-automation-mcp
 repo_name: allaudin/adb-automation-mcp
@@ -66,6 +67,7 @@ nav:
 
 theme:
   name: material
+  custom_dir: overrides
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default

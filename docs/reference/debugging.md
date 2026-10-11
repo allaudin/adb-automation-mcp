@@ -1,3 +1,8 @@
+---
+title: "Debugging: Backtraces, Tombstones, JDWP"
+description: "MCP tools for Android debugging over adb: process exit history, debug app, JDWP processes, native backtraces, and tombstones."
+---
+
 # debugging
 
 Debugging aids for a connected device.

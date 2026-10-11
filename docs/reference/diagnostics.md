@@ -1,3 +1,8 @@
+---
+title: "Diagnostics: ADB Health and Bug Reports"
+description: "MCP tools to check adb availability and version, and to capture an Android bug report to the host."
+---
+
 # diagnostics
 
 `check_adb_available` and `get_adb_version` are read-only health checks for

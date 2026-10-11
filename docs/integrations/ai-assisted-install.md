@@ -1,3 +1,8 @@
+---
+title: "AI-Assisted Install"
+description: "A copy-paste prompt that lets an AI coding assistant install uv, locate adb, and configure the adb-automation-mcp server in your MCP client."
+---
+
 # AI-Assisted Install
 
 If you're using an AI coding assistant that can run shell commands and edit your MCP

@@ -1,3 +1,8 @@
+---
+title: "Instrumentation: Run Android Tests"
+description: "MCP tool to run Android instrumentation tests via adb shell am instrument and get structured pass/fail results."
+---
+
 # instrumentation
 
 Running an Android instrumentation test runner on a connected device
@@ -8,7 +13,6 @@ run to finish and requests raw output, then parses the
 runner's summary stream. Typed `-e name value` runner arguments, `--user`
 scope, `--no-window-animation`, and a bounded `timeout_s` are supported; a
 free-form argument string is not. Test failures are returned as data — only a
-failure to *start* the runner raises (`INSTRUMENTATION_FAILED`). Listing the
-instrumentations on a device isn't implemented yet.
+failure to *start* the runner raises (`INSTRUMENTATION_FAILED`).
 
 ::: adb_automation_mcp.modules.instrumentation.tools

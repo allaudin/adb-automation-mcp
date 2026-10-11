@@ -1,3 +1,8 @@
+---
+title: "Binder IPC Call Statistics"
+description: "MCP tools to read and reset Android Binder IPC call statistics via adb shell dumpsys binder_calls_stats."
+---
+
 # binder
 
 Binder IPC call statistics (`adb shell dumpsys binder_calls_stats` and `...

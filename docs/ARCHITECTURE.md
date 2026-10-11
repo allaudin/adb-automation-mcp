@@ -1,3 +1,8 @@
+---
+title: "Architecture"
+description: "How adb-automation-mcp is built: plugin modules, the AdbBackend seam, policy-filtered tool registration, the response envelope, testing, and CI."
+---
+
 # Architecture
 
 ## 1. Overview

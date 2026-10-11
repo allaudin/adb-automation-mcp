@@ -1,3 +1,8 @@
+---
+title: "Logcat: Read and Capture Android Logs"
+description: "MCP tools to read, filter, clear, and capture Android logcat output, including per-package logs and log sessions."
+---
+
 # logger
 
 Pulls diagnostic logs off a connected device via `adb shell logcat`, in dump-and-exit

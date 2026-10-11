@@ -106,7 +106,7 @@ list.
 ## Testing
 
 ```bash
-uv run pytest        # meta (Layer 0), unit (Layer 1), and e2e (Layer 3) tests
+uv run pytest        # registry contract, unit, and e2e tests
 uv run mypy src       # strict type checking
 uv run ruff check .   # lint
 ```

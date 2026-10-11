@@ -9,7 +9,7 @@ An MCP server exposing Android Debug Bridge (ADB) capabilities as typed, documen
 tools and resources.
 
 **[Full documentation](https://allaudin.github.io/adb-automation-mcp/)** — architecture,
-decision log, per-tool reference, and client integration guides.
+per-tool reference, and client integration guides.
 
 ## Install
 
@@ -76,7 +76,7 @@ in-memory backend, not something a real client config needs):
 ## Testing
 
 ```bash
-uv run pytest        # meta (Layer 0), unit (Layer 1), and e2e (Layer 3) tests
+uv run pytest        # registry contract, unit, and e2e tests
 uv run mypy src       # strict type checking
 uv run ruff check .   # lint
 uv run mkdocs build --strict   # docs site

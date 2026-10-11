@@ -1,93 +1,16 @@
-# ADB MCP Server — Architecture
-
-This describes the system as it currently stands: what exists, how a process boots,
-and how the pieces work together.
-
-Last updated: 2026-08-26
+# Architecture
 
 ## 1. Overview
 
 An MCP server that exposes Android Debug Bridge (ADB) capabilities to MCP clients
-(Claude, other agents/IDEs) as typed, documented **tools** (actions) and **resources**
-(readable state).
+as typed, documented tools, over the `stdio` transport.
 
-**Goals:**
+Design principles:
 
 - Every behavior is verifiable without a physical device or emulator.
-- New command domains can be added as plugins, by third parties, without forking.
-- Operable like a real open-source project: semantic versioning, automated releases,
-  documented architecture, a PR workflow contributors can actually follow.
-
-**Non-goals (v1):**
-
-- A pure-Python re-implementation of the ADB wire protocol.
-- Multi-transport MCP support (HTTP/SSE) — ships `stdio` only.
-- A generic "run arbitrary shell command" tool in core.
-- Per-user or per-identity RBAC. The policy layer governs which tools exist at all on
-  a given server instance, not who is calling it.
-
-**Current implementation status (2026-08-26):** six modules exist under
-`src/adb_automation_mcp/modules/`: `diagnostics` (`check_adb_available`), `device_info`
-(`list_connected_devices`), `connection` (`restart_adb_server`,
-`connect_device`, `disconnect_device`, `restart_adbd_as_root` — the last
-restarts the *device-side* `adbd` daemon as root, `adb -s <serial> root`,
-distinct from `restart_adb_server`'s host-side adb server restart; judged on
-adb's message text rather than exit code, mirroring `connect_device`'s own
-exit-code-is-useless handling, and categorized `destructive` since it's a
-genuine privilege escalation rather than a data-mutating write — the only
-opt-in-gated category this project's policy model currently has for that),
-`user` (`get_current_user`, `dump_user`, `user_info`, `list_users`,
-`switch_user`, `create_user`, `remove_user`, `get_user_capabilities` — the
-last aggregates six separate `pm`/`cmd user` capability queries behind one
-read-only tool, treating the old `pm` ones as always-must-succeed and the
-newer `cmd user` ones as independently gracefully-degradable to `None` on
-Android versions that don't recognize them, without swallowing a genuine
-device-not-found failure on any of the six), `logger` (`read_logs`,
-`clear_logs`, `get_log_buffer_size`, `read_package_logs`, `start_log_session`,
-`stop_log_session` — see the Tool Reference site for exactly what each `adb
-shell` command is and its verified quirks), and `system_properties`
-(`get_property`, `list_properties`, `get_property_metadata`,
-`set_property` — rejects the `ctl.*`/`sys.powerctl` control-property
-namespaces up front rather than tunneling lifecycle/power operations through
-a plain property write; `get_property_metadata`'s SELinux-context/declared-type
-fields are best-effort and degrade to `None` on devices/Android versions that
-don't support the underlying `getprop -Z` capability). `stop_log_session` is
-the first tool that writes to the host filesystem; it's gated by a call-time
-`local_root` check (`ADB_AUTOMATION_LOCAL_ROOT`) — no default, refuses to run until
-an operator sets it.
-It passes `mypy --strict`, `ruff`,
-`pytest`, and has been verified
-end-to-end through a real `fastmcp` `Client` call, including against a real
-adb install for every module's failure paths except `system_properties` and
-the newer parts of `connection`/`user` (`restart_adbd_as_root`,
-`get_user_capabilities`), whose fixtures are shaped on documented adb/toybox
-behavior rather than a live-device capture (no device was available when
-they were added) — worth a real-device check before relying on
-`get_property_metadata`, `restart_adbd_as_root`'s exact wording, or
-`get_user_capabilities`'s optional fields in production. CI
-(`.github/workflows/ci.yml`) runs lint, type-check, and tests on every push/PR to
-`main`, plus a strict `mkdocs build` and (on merge to `main`) a GitHub Pages deploy.
-Everything else described below — additional modules, release automation,
-emulator integration — is the target shape, not yet built.
-
-**Package install/uninstall (2026-08-26):** the `packages` module (previously
-`list_packages` only) gained `install_apk`, `uninstall_package`, and
-`install_existing_for_user`. Semantic MCP options (`replace_existing`,
-`allow_downgrade`, `grant_runtime_permissions`, `allow_test_packages`,
-`force_sdk`, `user_id`, `keep_data`, `version_code`) map to adb/pm's own
-supported install/uninstall flags — no raw flag string is ever accepted from
-a client. `install_apk` reuses `AdbBackend.install`'s existing
-`(serial, apk_path, flags: list[str])` contract unchanged; `uninstall_package`
-and `install_existing_for_user` go through `AdbBackend.shell` (the same route
-`list_packages`/`grant_permission`/`clear_app_data` already use for `pm`
-subcommands) rather than extending `AdbBackend.uninstall`, since that
-primitive's `(serial, package, keep_data)` signature has no way to express
-`--user`/`--versionCode` — `AdbBackend` itself was not changed. Not verified
-live (no device was available when these were added) — shaped on documented
-`adb install`/`PackageManagerShellCommand` output conventions, same caveat as
-`system_properties`/`get_user_capabilities` above; worth a real-device check
-before relying on exact `Failure [REASON]`/missing-user wording in
-production.
+- Command domains are plugins; third-party packages can add modules without forking.
+- No generic shell tool — every operation is a specific, named, parameterized tool.
+- Policy controls which tools a server instance exposes, not who is calling them.
 
 ## 2. Component Architecture
 
@@ -97,18 +20,10 @@ graph TB
 
     Server --> Registry["Registry<br/>(entry_points discovery)"]
     Registry <--> Policy["PolicyEngine<br/>(category rules from config)"]
-    Registry --> ModDiag["diagnostics module"]
-    Registry --> ModDevices["device_info module"]
-    Registry --> ModConn["connection module"]
-    Registry --> ModUser["user module"]
-    Registry --> ModLogger["logger module"]
-    Registry -.-> ModExt["3rd-party module<br/>(separate PyPI package)"]
+    Registry --> ModBuiltin["Built-in modules<br/>(diagnostics, packages, user, ...)"]
+    Registry -.-> ModExt["Third-party module<br/>(separate package)"]
 
-    ModDiag --> Backend["AdbBackend<br/>(Protocol)"]
-    ModDevices --> Backend
-    ModConn --> Backend
-    ModUser --> Backend
-    ModLogger --> Backend
+    ModBuiltin --> Backend["AdbBackend<br/>(Protocol)"]
     ModExt -.-> Backend
 
     Backend --> Sub["SubprocessBackend<br/>(production)"]
@@ -126,9 +41,8 @@ Nothing above the `AdbBackend` line knows whether it's talking to a real device 
 fixture — that single seam is what makes "deterministic data for testing, real adb for
 production" possible without special-casing tests inside module code.
 
-The `Registry ↔ PolicyEngine` link is the other seam worth noting: the registry
-consults policy *before* handing a module's tool/resource to `FastMCP` for
-registration, not after. A denied tool is never exposed to the MCP client at all.
+The registry consults the `PolicyEngine` *before* handing a tool to `FastMCP` for
+registration. A denied tool is never exposed to the MCP client at all.
 
 ## 3. How a Process Boots
 
@@ -221,7 +135,7 @@ classDiagram
 by both implementations, so module code and tests assert against the same shape
 regardless of which backend is running underneath. `exec_out` is the one exception:
 it returns `ExecOutResult`, identical but with `stdout` as raw `bytes` (not decoded),
-for binary output such as `screencap -p` — see ADR-020.
+for binary output such as `screencap -p`.
 
 ### Service
 
@@ -274,10 +188,9 @@ four-key shape:
 
 Backend and module code never construct this directly — they return data or raise a
 typed `AdbError` subclass, and a single wrapper at the registry boundary
-(`wrap_with_envelope`) converts whichever happened into the envelope. No tool
-deviates from this — `take_screenshot` saves a PNG to `local_root` and returns its
-path in the ordinary envelope (ADR-022; an `@image_content` carve-out briefly
-existed under ADR-020 and was reverted).
+(`wrap_with_envelope`) converts whichever happened into the envelope. Tools that
+produce files (e.g. `take_screenshot`) write them under `ADB_AUTOMATION_LOCAL_ROOT`
+and return the path in the envelope.
 
 ## 5. How They Work Together — A Tool Call
 
@@ -373,25 +286,11 @@ Heuristic applied consistently across modules:
 > **Resource** — if it's an idempotent, addressable, "GET-like" piece of device state
 > a client might want to read/re-read/cache.
 
-Every resource is implicitly category `read`. Tools are tagged individually — the
-category is what the policy layer filters on. `Registry.register_resources` wires
-manifest resources into FastMCP via `mcp.resource(uri)`, wrapped by
-`wrap_resource` (a lighter-weight, envelope-free error handling path) rather
-than `wrap_with_envelope` — implemented and exercised (`tests/unit/test_registry.py`,
-`tests/e2e/`'s `register_resources` call), but no module currently registers a
-resource through it.
-
-`adb://devices` was originally planned as a resource; it shipped instead as
-the `list_connected_devices` tool in the `device_info` module (kept out of
-`diagnostics`, which only reports on adb-connection health and never mutates
-anything — introspecting individual devices, restarting the server, or connecting
-to one over TCP each belong to a different module).
-Reason: not every MCP client surfaces resources to the model as readily as it
-surfaces tools — confirmed directly, `adb://devices` worked when read from Claude
-Code but Claude Desktop couldn't read it at all. The tool form is the safe default
-until a client-compatible way to offer both is worth the duplication; the resource
-machinery stays in place for a future read where re-read/cache semantics
-genuinely matter more than universal client support.
+Tools are tagged individually with a category, which the policy layer filters on.
+Resources are implicitly `read` and are registered through `Registry.register_resources`,
+using a lighter, envelope-free error path. Device state is currently exposed as tools
+(e.g. `list_connected_devices`), since not every MCP client surfaces resources to the
+model.
 
 ## 8. Repository Layout
 
@@ -400,16 +299,17 @@ adb-automation-mcp/
 ├── pyproject.toml
 ├── uv.lock
 ├── mkdocs.yml                # docs site config — nav, theme, mkdocstrings
-├── README.md                 # short pitch + link to the docs site; not the manual
-├── docs/                     # docs_dir for mkdocs — served at the Pages URL
-│   ├── index.md              # docs site home page (the old README content lives here)
-│   ├── ARCHITECTURE.md       # this file — current-state description
+├── README.md
+├── docs/                     # mkdocs source
+│   ├── index.md
+│   ├── ARCHITECTURE.md
 │   ├── reference/            # one page per module, mkdocstrings-generated from tools.py
 │   └── integrations/         # per-MCP-client setup guides
 ├── LICENSE
 ├── .github/
 │   └── workflows/
-│       └── ci.yml            # lint, type-check, tests, docs build/deploy — on every push/PR
+│       ├── ci.yml            # lint, type-check, tests, docs build/deploy
+│       └── publish.yml       # PyPI publish on GitHub release
 ├── src/
 │   └── adb_automation_mcp/
 │       ├── __main__.py
@@ -423,105 +323,33 @@ adb-automation-mcp/
 │       │   ├── subprocess_backend.py
 │       │   └── testing.py    # FakeBackend
 │       └── modules/
-│           ├── diagnostics/       # service.py, tools.py, manifest.py
-│           ├── device_info/       # service.py, tools.py, manifest.py
-│           ├── connection/        # service.py, tools.py, manifest.py
-│           ├── user/              # service.py, tools.py, manifest.py
-│           ├── logger/            # service.py, tools.py, manifest.py
-│           └── system_properties/ # service.py, tools.py, manifest.py
+│           └── <module>/     # service.py, tools.py, manifest.py
 └── tests/
-    ├── meta/                 # Layer 0 — registry contract (typing + docstrings)
-    ├── unit/                 # Layer 1, per module
-    └── e2e/                  # Layer 3 — protocol-level, real fastmcp.Client
+    ├── meta/                 # registry contract (typing + docstrings)
+    ├── unit/                 # per-module service tests
+    └── e2e/                  # protocol-level, real fastmcp.Client
 ```
 
 Single distribution (not a `uv` workspace of many packages) — built-in modules are
 subpackages of `adb_automation_mcp`, registered through the same `entry_points` mechanism a
 third-party plugin would use.
 
-## 9. Testing Layers
+## 9. Testing
 
-```mermaid
-graph TB
-    subgraph Pyramid[" "]
-    direction TB
-    A["E2E / Integration (CI, emulator-gated)<br/>real device via SubprocessBackend<br/>few, slow"]
-    B["Protocol-level E2E<br/>real MCP client ↔ FastMCP server, FakeBackend"]
-    C["Contract tests<br/>same suite run against FakeBackend AND SubprocessBackend"]
-    D["Unit / behavior tests<br/>per-module service class, FakeBackend<br/>many, fast"]
-    E["Registry contract (meta-tests)<br/>every registered tool: fully typed + documented<br/>fastest, runs first"]
-    end
-    E --> D --> C --> B --> A
-```
+All tests run against `FakeBackend`; no device or emulator is required.
 
-**Layer 0 — Registry contract.** Introspects every tool actually registered and
-asserts full typing and a complete docstring, including a worked example. Needs no
-backend, no event loop — just the live registry. Implemented (`tests/meta/`).
-
-**Layer 1 — Unit/behavior tests.** Target a module's domain service class directly
-against `FakeBackend` — no MCP registration or event-loop server startup involved.
-Implemented (`tests/unit/`).
-
-**Layer 2 — Contract tests.** A shared test suite written once against the
-`AdbBackend` Protocol, parametrized over `[FakeBackend, SubprocessBackend]`, verifying
-transport-level exception parity between them. Not yet implemented.
-
-**Layer 3 — Protocol-level E2E.** Tests that speak actual MCP protocol to a running
-`FastMCP` server instance, backed by `FakeBackend`, catching registration/schema/
-serialization bugs unit tests can't see — a real bug this layer caught on its first
-day: the `adb://devices` resource function returned `list[ConnectedDevice]` (pydantic
-models) directly, which Layer 0/1 tests never exercised through fastmcp's actual
-resource-read/serialization path, so they passed while every real read of the
-resource raised `TypeError: Object of type ConnectedDevice is not JSON
-serializable`. Implemented (`tests/e2e/`), using `fastmcp.Client(mcp)` in-memory
-against a `Registry`-wired server backed by `FakeBackend`.
-
-**Layer 4 — CI emulator integration.** Runs the Layer 2 `SubprocessBackend` contract
-tests plus a smoke subset of Layer 3 against a real Android emulator in CI. Not yet
-implemented.
+| Layer | Location | Scope |
+|---|---|---|
+| Registry contract | `tests/meta/` | Every registered tool is fully typed and has a complete docstring with an example. |
+| Unit | `tests/unit/` | Each module's service class against `FakeBackend`, without MCP machinery. |
+| Protocol E2E | `tests/e2e/` | A real `fastmcp.Client` against a `Registry`-wired server, covering registration, schema, and serialization. |
 
 ## 10. CI/CD
 
-**Current status:** `.github/workflows/ci.yml` has two jobs: `test` (`ruff check` →
-`mypy --strict` → `pytest`, Layer 0 + Layer 1 + Layer 3, one Python version) and
-`docs` (`mkdocs build --strict` on every push/PR; `mkdocs gh-deploy` additionally, only
-on push to `main`). That's the entire pipeline that exists right now — folded into
-`ci.yml` rather than a separate `docs.yml`, since one extra job isn't yet enough to
-justify a second workflow file.
+- **`ci.yml`** — on every push and pull request to `main`: `ruff check`, `mypy --strict`,
+  `pytest`, and `mkdocs build --strict`. On push to `main`, the docs site is deployed
+  to GitHub Pages.
+- **`publish.yml`** — on a published GitHub release: builds with `uv build` and
+  publishes to PyPI via trusted publishing.
 
-**Target shape:**
-
-```mermaid
-flowchart LR
-    subgraph PR["Pull Request"]
-    P0["registry meta-tests"] --> P1["ruff"] --> P2["mypy --strict"] --> P3["unit + contract(fake) + E2E tests"] --> P4["emulator smoke subset"] --> P5["mkdocs build --strict"]
-    end
-    subgraph Main["Merge to main"]
-    M1["full test suite<br/>(full Python matrix)"] --> M2["coverage report"] --> M3["mkdocs gh-deploy"]
-    end
-    subgraph Nightly["Nightly (scheduled)"]
-    N1["full matrix"] --> N2["full emulator integration"]
-    end
-    subgraph Release["Release (on main, via Conventional Commits)"]
-    R0["full matrix + full emulator gate"] --> R1["python-semantic-release"] --> R2["uv build"] --> R3["PyPI publish"] --> R4["GitHub Release + CHANGELOG.md"]
-    end
-    PR --> Main
-    Main --> Release
-    Nightly -.->|failure pages, doesn't block merges| Main
-```
-
-`nightly.yml` and `release.yml` don't exist yet — each gets added once the
-infrastructure it depends on (contract/E2E/emulator tests, semantic-release config)
-actually exists, not ahead of it. The mkdocs build/deploy steps this diagram shows as
-`P5`/`M3` are implemented, currently as a `docs` job inside `ci.yml` rather than a
-standalone `docs.yml`.
-
-**Versioning:** SemVer, driven by Conventional Commits (`fix:`, `feat:`,
-`feat!:`/`BREAKING CHANGE:`) once `python-semantic-release` is wired up.
-
-**Publishing (planned):** PyPI trusted publishing (OIDC from GitHub Actions).
-
----
-
-*Living documentation — sections are updated in place as the system changes, not
-appended to.*
+Versioning follows [Semantic Versioning](https://semver.org/).

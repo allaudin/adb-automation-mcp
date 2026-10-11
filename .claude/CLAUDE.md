@@ -105,5 +105,4 @@ documented. Layer 1 (`../tests/unit`, per module) — service class against
 `FakeBackend`, no MCP machinery. Layer 3 (`../tests/e2e`) — real `fastmcp.Client`
 against a `Registry`-wired server backed by `FakeBackend`, catching
 registration/schema/serialization bugs the lower layers can't see. Layers 2
-(dual-backend contract tests) and 4 (CI emulator integration) are not yet
-implemented — see `../docs/ARCHITECTURE.md` §9.
+(dual-backend contract tests) and 4 (CI emulator integration) are not implemented.

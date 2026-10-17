@@ -73,6 +73,10 @@ config file or a Claude Code project's `.mcp.json`):
 }
 ```
 
+This example shows the recommended minimum. For every available setting, including
+the command timeout, destructive tools, and a simulated test device, see
+[Configuration](configuration.md).
+
 !!! tip "Set the full path to `adb`"
     MCP clients usually start servers with a minimal environment that doesn't include
     your shell's `PATH`. Even if `adb` works in your terminal, set

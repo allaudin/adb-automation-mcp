@@ -1,0 +1,30 @@
+/* Mermaid diagrams render into a shadow root (see extra.js), so sizing/cursor
+   for the diagram itself is set from JS via inline style on the SVG — regular
+   CSS rules here can't cross into shadow DOM. This just covers the outer
+   light-DOM wrapper and the zoom overlay. */
+
+.mermaid {
+  overflow-x: auto;
+  cursor: zoom-in;
+}
+
+.mermaid-zoom-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  overflow: auto;
+  cursor: zoom-out;
+  background: color-mix(in srgb, var(--md-default-fg-color) 60%, transparent);
+}
+
+.mermaid-zoom-overlay svg {
+  max-width: none !important;
+  background: var(--md-default-bg-color);
+  border-radius: 0.2rem;
+  padding: 1rem;
+  box-shadow: var(--md-shadow-z3);
+}

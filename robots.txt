@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://allaudin.github.io/adb-automation-mcp/sitemap.xml

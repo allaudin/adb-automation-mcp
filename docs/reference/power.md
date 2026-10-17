@@ -3,7 +3,7 @@ title: "Power: State, Wake, Reboot"
 description: "MCP tools to read Android power state, wake the screen, and reboot a device via adb."
 ---
 
-# power
+# Power
 
 `get_power_state` reads the device's current high-level power state (`adb
 shell dumpsys power`) — wakefulness and, when reported, interactive state.

@@ -3,7 +3,7 @@ title: "Screen: Screenshots and Screen Recording"
 description: "MCP tools to capture Android screenshots (PNG) and screen recordings (MP4) via adb and save them to the host."
 ---
 
-# screen
+# Screenshots & Recording
 
 Capturing the device screen and saving it to this server's host.
 `take_screenshot` runs `adb exec-out screencap -p` and writes a PNG to

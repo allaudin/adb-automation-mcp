@@ -1,8 +1,5 @@
-"""Module-level, statically-introspectable tool functions for the logger module.
-
-Kept as plain top-level functions, never closures, so that documentation tooling and
-the registry meta-test can both introspect them directly.
-"""
+# Tool functions are plain module-level functions, never closures, so that
+# documentation tooling and the registry meta-test can introspect them directly.
 
 from __future__ import annotations
 
@@ -262,12 +259,7 @@ async def start_log_session(
     given here), and stop_log_session later dumps everything matching that
     filter from that point to when it's called. See stop_log_session for how
     the captured logs actually reach a file. Filtering is configured here,
-    not at stop time, so this API shape would still work if session capture
-    ever became a true live background tail (whose filter flags have to be
-    fixed when the process starts, not changed mid-stream) — a checkpoint-
-    and-dump session's filter is applied at replay time either way, so the
-    two are equivalent for now, but only one of them stays correct if that
-    changes later.
+    when the session starts, not when it stops.
 
     Args:
         serial: The target device's adb serial (see list_connected_devices).

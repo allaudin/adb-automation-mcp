@@ -3,7 +3,7 @@ title: "Tracing: Perfetto and IPC Traces"
 description: "MCP tools to capture Perfetto system traces with presets and Binder IPC traces on Android, saved to the host."
 ---
 
-# tracing
+# System Tracing
 
 Perfetto system traces and ActivityManager Binder/IPC transaction traces.
 

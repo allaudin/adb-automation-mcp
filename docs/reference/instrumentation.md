@@ -3,7 +3,7 @@ title: "Instrumentation: Run Android Tests"
 description: "MCP tool to run Android instrumentation tests via adb shell am instrument and get structured pass/fail results."
 ---
 
-# instrumentation
+# Instrumentation Tests
 
 Running an Android instrumentation test runner on a connected device
 (`adb shell am instrument -w -r`). `run_instrumentation` always waits for the

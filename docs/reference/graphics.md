@@ -3,7 +3,7 @@ title: "Graphics: Frame Stats and Jank"
 description: "MCP tools to read and reset Android frame rendering and jank statistics via adb shell dumpsys gfxinfo framestats."
 ---
 
-# graphics
+# Graphics & Frame Stats
 
 Rendering / jank frame statistics for an app (`adb shell dumpsys gfxinfo
 <package> framestats` and `... reset`). `get_frame_stats` parses only the

@@ -3,7 +3,7 @@ title: "Activities: Launch, Resolve, Foreground"
 description: "MCP tools to launch Android activities, resolve which activity handles an intent, and read the foreground activity via adb."
 ---
 
-# activities
+# Activities
 
 Launching Android activities (`adb shell am start`), resolving which activity
 would handle an intent without launching it (`cmd package resolve-activity`),

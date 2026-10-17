@@ -3,7 +3,7 @@ title: "Connection: ADB Server and Device Connections"
 description: "MCP tools to restart the adb server, connect devices over TCP/IP, switch adbd between root and shell, and wait for device state."
 ---
 
-# connection
+# Connection
 
 Operations that change how this host's adb reaches a device: the local adb
 server's own lifecycle and connections (global, non-device-scoped), plus the

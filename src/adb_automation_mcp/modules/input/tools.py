@@ -1,8 +1,5 @@
-"""Module-level, statically-introspectable tool functions for the input module.
-
-Kept as plain top-level functions, never closures, so that documentation tooling and
-the registry meta-test can both introspect them directly.
-"""
+# Tool functions are plain module-level functions, never closures, so that
+# documentation tooling and the registry meta-test can introspect them directly.
 
 from __future__ import annotations
 
@@ -27,8 +24,8 @@ async def tap(ctx: Context, serial: str, x: int, y: int, display_id: int | None 
 
     Models one specific input event (a tap) rather than accepting a raw
     `input` command string — see the module docs for why this server never
-    exposes arbitrary shell arguments. Swipe, text, and key events aren't
-    implemented yet.
+    exposes arbitrary shell arguments. For other input events, use swipe,
+    input_text, or press_key.
 
     Args:
         serial: The target device's adb serial (see list_connected_devices).

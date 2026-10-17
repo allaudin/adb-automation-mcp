@@ -3,7 +3,7 @@ title: "App Data: Clear Data and Cache"
 description: "MCP tools to clear an Android app's full data via adb shell pm clear, or only its cache while leaving data intact."
 ---
 
-# app_data
+# App Data
 
 Clearing an installed package's data on a connected device.
 `clear_app_data` runs the unscoped `adb shell pm clear`, wiping databases,

@@ -3,7 +3,7 @@ title: "Network: Interfaces, Routes, Connectivity"
 description: "MCP tools to read Android network interfaces, routing table, and connectivity state via adb shell ip and dumpsys connectivity."
 ---
 
-# network
+# Network
 
 Read-only views of a device's network state: `list_network_interfaces`
 (interfaces and their addresses, `adb shell ip addr show`), `get_routes`

@@ -16,9 +16,10 @@ site_dir: site
 watch:
   - src
 
-# Internal-only file, not part of the public site.
+# Contributor-facing design docs — kept in the repo, not part of the public site.
 exclude_docs: |
   ADR.md
+  ARCHITECTURE.md
 
 extra_css:
   - assets/extra.css
@@ -27,43 +28,51 @@ extra_javascript:
 
 nav:
   - Home: index.md
-  - Architecture: ARCHITECTURE.md
-  - Tool Reference:
-      - anr: reference/anr.md
-      - diagnostics: reference/diagnostics.md
-      - device_info: reference/device_info.md
-      - connection: reference/connection.md
-      - port_forwarding: reference/port_forwarding.md
-      - user: reference/user.md
-      - logger: reference/logger.md
-      - system_properties: reference/system_properties.md
-      - packages: reference/packages.md
-      - activities: reference/activities.md
-      - app_data: reference/app_data.md
-      - android_services: reference/android_services.md
-      - binder: reference/binder.md
-      - broadcasts: reference/broadcasts.md
-      - content: reference/content.md
-      - date_time: reference/date_time.md
-      - debugging: reference/debugging.md
-      - displays: reference/displays.md
-      - files: reference/files.md
-      - graphics: reference/graphics.md
-      - instrumentation: reference/instrumentation.md
-      - memory: reference/memory.md
-      - network: reference/network.md
-      - permissions: reference/permissions.md
-      - power: reference/power.md
-      - profiling: reference/profiling.md
-      - processes: reference/processes.md
-      - screen: reference/screen.md
-      - settings: reference/settings.md
-      - tracing: reference/tracing.md
-      - input: reference/input.md
-      - ui: reference/ui.md
+  - Configuration: configuration.md
   - Integrations:
       - Claude Code: integrations/claude-code.md
       - AI-Assisted Install: integrations/ai-assisted-install.md
+  - Tool Reference:
+      - Overview: reference/index.md
+      - Devices & Connection:
+          - Device Info: reference/device_info.md
+          - Connection: reference/connection.md
+          - Diagnostics: reference/diagnostics.md
+          - Port Forwarding: reference/port_forwarding.md
+          - Power: reference/power.md
+          - Date & Time: reference/date_time.md
+      - Apps:
+          - Packages: reference/packages.md
+          - Activities: reference/activities.md
+          - Services: reference/android_services.md
+          - Broadcasts: reference/broadcasts.md
+          - Permissions: reference/permissions.md
+          - App Data: reference/app_data.md
+          - Processes: reference/processes.md
+          - Content Providers: reference/content.md
+          - Instrumentation Tests: reference/instrumentation.md
+      - Screen & Interaction:
+          - Screenshots & Recording: reference/screen.md
+          - Input: reference/input.md
+          - UI Inspection: reference/ui.md
+          - Displays: reference/displays.md
+      - Device Configuration:
+          - Settings: reference/settings.md
+          - System Properties: reference/system_properties.md
+          - Users: reference/user.md
+          - Network: reference/network.md
+      - Files:
+          - Files: reference/files.md
+      - Logs & Debugging:
+          - Logs (logcat): reference/logger.md
+          - ANR Reports: reference/anr.md
+          - Debugging: reference/debugging.md
+      - Performance:
+          - Memory: reference/memory.md
+          - Graphics & Frame Stats: reference/graphics.md
+          - Method Profiling: reference/profiling.md
+          - System Tracing: reference/tracing.md
+          - Binder IPC: reference/binder.md
 
 theme:
   name: material
@@ -91,7 +100,7 @@ markdown_extensions:
   - pymdownx.details
   - pymdownx.superfences:
       # Required for Material to render ```mermaid fences as actual diagrams
-      # instead of plain code blocks — ARCHITECTURE.md has 7 of them.
+      # instead of plain code blocks.
       custom_fences:
         - name: mermaid
           class: mermaid
@@ -107,8 +116,16 @@ plugins:
       handlers:
         python:
           options:
-            show_source: true
-            show_root_heading: true
+            # Reader-facing reference: no source listings, no module heading
+            # (each page has its own H1), and no signature line — the
+            # Parameters table covers every argument, and the signature would
+            # otherwise expose the internal `ctx: Context` parameter.
+            show_source: false
+            show_root_heading: false
+            show_signature: false
+            show_symbol_type_heading: false
+            show_symbol_type_toc: false
+            show_labels: false
             docstring_style: google
             merge_init_into_class: true
             show_signature_annotations: true

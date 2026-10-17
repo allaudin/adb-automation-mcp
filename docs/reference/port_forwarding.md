@@ -3,7 +3,7 @@ title: "Port Forwarding: adb forward and reverse"
 description: "MCP tools to create, list, and remove adb forward and adb reverse socket mappings between host and device."
 ---
 
-# port_forwarding
+# Port Forwarding
 
 Host-to-device socket forwards set up through the local adb server
 (`adb forward`). Distinct from [connection](connection.md), which manages the

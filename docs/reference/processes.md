@@ -3,7 +3,7 @@ title: "Processes: List, Inspect, Stop"
 description: "MCP tools to list Android processes, resolve PIDs, read process memory, force-stop apps, and kill background processes."
 ---
 
-# processes
+# Processes
 
 Inspecting and stopping processes on a connected device. `list_processes`
 returns structured `ps` rows (pid/ppid/user/rss/name) with an optional

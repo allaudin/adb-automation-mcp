@@ -3,7 +3,7 @@ title: "Device Info: List Connected Devices"
 description: "MCP tool to list Android devices and emulators connected over adb, with state and device details."
 ---
 
-# device_info
+# Device Info
 
 Read-only introspection of currently connected devices.
 

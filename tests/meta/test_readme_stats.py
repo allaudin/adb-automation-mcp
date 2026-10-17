@@ -1,5 +1,6 @@
 """Layer 0: the per-module tool listing in README.md (and the tool-count summary in
-README.md + docs/index.md) must match the live registry. Same source of truth as
+README.md + docs/index.md, and the tool overview in docs/reference/index.md) must match
+the live registry. Same source of truth as
 test_tool_contract.py — discover_modules() — so a tool added or moved without updating
 the docs fails CI here, printing the corrected table to paste in.
 """
@@ -16,6 +17,7 @@ from adb_automation_mcp.registry import discover_modules
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _README = _REPO_ROOT / "README.md"
 _DOCS_INDEX = _REPO_ROOT / "docs" / "index.md"
+_REFERENCE_INDEX = _REPO_ROOT / "docs" / "reference" / "index.md"
 
 
 def _module_rows() -> list[tuple[str, list[str]]]:
@@ -74,3 +76,18 @@ def test_tools_count_matches_registry_in_readme_and_docs() -> None:
             problems.append(f"{label}: says '**{m.group(1)} tools.**', registry has {total}")
     if problems:
         pytest.fail("tool count is stale:\n  - " + "\n  - ".join(problems))
+
+
+def test_reference_overview_lists_every_tool() -> None:
+    text = _REFERENCE_INDEX.read_text()
+    missing = [
+        f"{module}.{name.rstrip('†')}"
+        for module, names in _module_rows()
+        for name in names
+        if f"modules.{module}.tools.{name.rstrip('†')})" not in text
+    ]
+    if missing:
+        pytest.fail(
+            "docs/reference/index.md is missing a row (linked to its module page) for:\n  - "
+            + "\n  - ".join(missing)
+        )

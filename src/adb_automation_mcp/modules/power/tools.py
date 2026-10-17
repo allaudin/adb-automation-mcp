@@ -1,8 +1,5 @@
-"""Module-level, statically-introspectable tool functions for the power module.
-
-Kept as plain top-level functions, never closures, so that documentation tooling and
-the registry meta-test can both introspect them directly.
-"""
+# Tool functions are plain module-level functions, never closures, so that
+# documentation tooling and the registry meta-test can introspect them directly.
 
 from __future__ import annotations
 
@@ -27,8 +24,8 @@ async def get_power_state(ctx: Context, serial: str) -> PowerState:
     implementation detail, so this deliberately extracts only two fields:
     wakefulness (the device's core sleep/wake state) and, when present,
     whether it's currently interactive. Nothing else from the dump is
-    parsed or exposed. Power-related control (reboot, shutdown, sleep,
-    wake) isn't implemented yet.
+    parsed or exposed. To change power state, use wake_device or
+    reboot_device.
 
     Args:
         serial: The target device's adb serial (see list_connected_devices).

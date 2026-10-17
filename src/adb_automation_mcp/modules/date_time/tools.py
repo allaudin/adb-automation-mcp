@@ -1,9 +1,5 @@
-"""Module-level, statically-introspectable tool functions for the
-date_time module.
-
-Kept as plain top-level functions, never closures, so that documentation tooling and
-the registry meta-test can both introspect them directly.
-"""
+# Tool functions are plain module-level functions, never closures, so that
+# documentation tooling and the registry meta-test can introspect them directly.
 
 from __future__ import annotations
 
@@ -23,8 +19,8 @@ async def get_date_time(ctx: Context, serial: str) -> DeviceDateTime:
     the returned timestamp reflects what the device itself reports.
     Requests an explicit, machine-readable ISO-8601-shaped `+FORMAT`
     rather than `date`'s locale-dependent default human-readable output,
-    so the result is predictable to parse. Setting the date/time or time
-    zone isn't implemented yet.
+    so the result is predictable to parse. Read-only: setting the date,
+    time, or time zone is not supported.
 
     Args:
         serial: The target device's adb serial (see list_connected_devices).

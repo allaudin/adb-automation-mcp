@@ -71,6 +71,5 @@ At the end report:
 * any action I still need to take
 ```
 
-See the [docs home page](../index.md) for the config shape this produces and every
-supported env var, and [Integrating with Claude Code](claude-code.md) for the
-manual/CLI equivalent.
+See [Configuration](../configuration.md) for every supported setting, and
+[Claude Code](claude-code.md) for the manual equivalent.

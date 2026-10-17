@@ -5,83 +5,58 @@ description: "Install and configure adb-automation-mcp, an MCP server that gives
 
 # adb-automation-mcp
 
-An MCP server exposing Android Debug Bridge (ADB) capabilities as typed, documented
-tools and resources. See [Architecture](ARCHITECTURE.md) for how the system is put
-together.
+**adb-automation-mcp** is a [Model Context Protocol](https://modelcontextprotocol.io)
+(MCP) server that lets AI assistants such as Claude work with Android devices and
+emulators over the Android Debug Bridge (`adb`).
+
+Rather than handing the assistant a raw shell, the server exposes **111 tools.** Each
+one is a specific, named operation with typed parameters, such as installing an APK,
+taking a screenshot, reading logcat, or tapping a point on screen. Each tool
+documents what it does, what it returns, and how it fails, so an assistant can pick
+the right one and act on the result reliably.
+
+## Highlights
+
+- **Broad coverage.** Apps, activities, services, permissions, input, UI inspection,
+  screenshots and recordings, logs, files, settings, users, networking, memory,
+  tracing, profiling, and more. See the [Tool Reference](reference/index.md).
+- **Safe by default.** Tools that can permanently remove data or interrupt a device,
+  such as uninstalling an app or rebooting, are hidden unless you opt in. There is
+  deliberately no "run any shell command" tool.
+- **Controlled file access.** Tools that save files to your computer (screenshots,
+  logs, traces, bug reports) can write only inside one folder that you choose.
+- **Predictable responses.** Every tool returns the same response shape, with a
+  short human-readable message and structured data.
 
 ## Requirements
 
-- Python ≥ 3.10
-- [uv](https://docs.astral.sh/uv/)
-- Android platform-tools (`adb`) — only needed for the real backend; the fake backend
-  (below) needs nothing device-related installed.
+- Python 3.10 or later
+- [uv](https://docs.astral.sh/uv/) (recommended) or `pip`
+- Android SDK Platform-Tools, which provides `adb`
+- An Android device with USB debugging enabled, or a running emulator
 
-## Running it
+## Quick start
 
-```bash
-uv sync
-uv run adb-automation-mcp
-```
-
-By default this talks to the `adb` binary found on `PATH`. Configure it with env vars:
-
-| Env var | Purpose | Default |
-|---|---|---|
-| `ADB_AUTOMATION_BACKEND=fake` | Use the deterministic fake backend instead of real adb — no `adb` binary or device needed | unset (real backend) |
-| `ADB_AUTOMATION_ADB_PATH` | Explicit path to the `adb` binary | unset (resolved via `PATH`) |
-| `ADB_AUTOMATION_TIMEOUT_S` | Per-command timeout, in seconds | `10` |
-| `ADB_AUTOMATION_ALLOW_DESTRUCTIVE=1` | Opt in to `destructive`-category tools (e.g. `uninstall_package`, `remove_user`, `restart_adbd_as_root`) | unset (denied by default) |
-| `ADB_AUTOMATION_LOCAL_ROOT` | The folder on this machine where file-saving tools are allowed to write | unset — those tools refuse to write anywhere until set |
-
-`ADB_AUTOMATION_ADB_PATH` matters more than it might seem: an MCP client (Claude Code, Claude
-Desktop, ...) launches this server with a minimal environment that usually does **not**
-include your shell's `PATH` customizations, so `adb` resolving fine in your terminal
-doesn't mean it'll resolve inside the launched server. Set the path explicitly when
-integrating with a client (see [Integrations](integrations/claude-code.md)).
+Run the server straight from PyPI with `uvx`. No clone or separate install step is
+needed:
 
 ```bash
-# real device/emulator, explicit adb path
-ADB_AUTOMATION_ADB_PATH=/path/to/platform-tools/adb uv run adb-automation-mcp
-
-# deterministic fake backend, no adb required
-ADB_AUTOMATION_BACKEND=fake uv run adb-automation-mcp
+uvx adb-automation-mcp
 ```
 
-### Where saved files go (`ADB_AUTOMATION_LOCAL_ROOT`)
-
-A few tools save a file to this machine: `pull_file` (copies a file off the device),
-`stop_log_session` (saves a captured log), and `take_screenshot` (saves the PNG and
-returns its path — it does not return image bytes inline).
-`ADB_AUTOMATION_LOCAL_ROOT` is the one folder these tools are allowed to write into —
-there's no fallback location, so they refuse to run until it's set.
-
-`pull_file` and `stop_log_session` take a `local_path` argument, a path *inside* that
-folder. With `ADB_AUTOMATION_LOCAL_ROOT=/home/you/adb-downloads` set:
-
-- `pull_file(..., local_path="ui-dump.xml")` writes to
-  `/home/you/adb-downloads/ui-dump.xml`
-- `stop_log_session(..., local_path="session1.log")` writes to
-  `/home/you/adb-downloads/session1.log`
-- `take_screenshot(...)` writes to
-  `/home/you/adb-downloads/screenshots/screenshot-<serial>-<timestamp>.png`
-  (or `screenshots/<filename>.png` when `filename=` is given) and returns that
-  absolute path
-
-A `local_path` that tries to escape that folder — `../elsewhere`, or an absolute path
-pointing somewhere else — is rejected rather than written anywhere.
+Or install it with `pip`:
 
 ```bash
-ADB_AUTOMATION_LOCAL_ROOT=/home/you/adb-downloads uv run adb-automation-mcp
+pip install adb-automation-mcp
 ```
 
-## MCP client configuration
+The server communicates over standard input/output, so you normally don't run it by
+hand. Your MCP client starts it for you.
 
-Add this to your client's `mcp.json` (e.g. Claude Desktop's config, or a Claude Code
-project's `.mcp.json` — see [Integrations](integrations/claude-code.md)). Other
-clients use a similar `command`/`args`/`env` shape but a different top-level key (VS
-Code Copilot's `.vscode/mcp.json`, for instance, uses `servers` instead of
-`mcpServers`) — check your client's own MCP docs for the exact wrapper. Every env var
-from the table above is optional; shown here with example values:
+## Connect it to your MCP client
+
+Add the server to your client's MCP configuration (for example, Claude Desktop's
+config file or a Claude Code project's `.mcp.json`):
 
 ```json
 {
@@ -91,30 +66,31 @@ from the table above is optional; shown here with example values:
       "args": ["adb-automation-mcp"],
       "env": {
         "ADB_AUTOMATION_ADB_PATH": "/path/to/platform-tools/adb",
-        "ADB_AUTOMATION_TIMEOUT_S": "10",
-        "ADB_AUTOMATION_ALLOW_DESTRUCTIVE": "1",
-        "ADB_AUTOMATION_LOCAL_ROOT": "/path/to/local/root"
+        "ADB_AUTOMATION_LOCAL_ROOT": "/path/to/adb-output"
       }
     }
   }
 }
 ```
 
-## Available tools
+!!! tip "Set the full path to `adb`"
+    MCP clients usually start servers with a minimal environment that doesn't include
+    your shell's `PATH`. Even if `adb` works in your terminal, set
+    `ADB_AUTOMATION_ADB_PATH` to its absolute path. You can find it with
+    `which adb` on macOS/Linux or `where adb` on Windows.
 
-**111 tools.** See the [Tool Reference](reference/diagnostics.md) for every tool's full
-signature, docstring, and worked example — generated directly from source, so it can't
-drift out of sync with what the server actually exposes. The
-[README](https://github.com/allaudin/adb-automation-mcp#tools) has the full per-module
-list.
+Other clients use the same `command`/`args`/`env` fields under a different top-level
+key. VS Code, for example, uses `servers` instead of `mcpServers`. Check your
+client's MCP documentation for the exact format.
 
-## Testing
+## Next steps
 
-```bash
-uv run pytest        # registry contract, unit, and e2e tests
-uv run mypy src       # strict type checking
-uv run ruff check .   # lint
-```
+- [Configuration](configuration.md): all settings, where saved files go, and
+  how to enable destructive tools.
+- [Claude Code](integrations/claude-code.md): register the server with one command.
+- [AI-Assisted Install](integrations/ai-assisted-install.md): a prompt that lets your
+  AI assistant install and configure everything for you.
+- [Tool Reference](reference/index.md): every tool, grouped by area.
 
 ## License
 

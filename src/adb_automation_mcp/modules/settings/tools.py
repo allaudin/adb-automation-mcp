@@ -1,9 +1,5 @@
-"""Module-level, statically-introspectable tool functions for the settings
-module.
-
-Kept as plain top-level functions, never closures, so that documentation tooling and
-the registry meta-test can both introspect them directly.
-"""
+# Tool functions are plain module-level functions, never closures, so that
+# documentation tooling and the registry meta-test can introspect them directly.
 
 from __future__ import annotations
 
@@ -31,8 +27,8 @@ async def get_setting(
     so an invalid namespace is rejected before this tool (or any adb
     command) ever runs. Deliberately distinct from system_properties'
     get_property: Settings (SettingsProvider) and system properties
-    (`getprop`/`setprop`) are unrelated Android subsystems. Writing a
-    setting (`put`/`delete`) isn't implemented yet.
+    (`getprop`/`setprop`) are unrelated Android subsystems. Use set_setting
+    to write a value.
 
     Args:
         serial: The target device's adb serial (see list_connected_devices).
@@ -102,7 +98,7 @@ async def set_setting(
     original when your scenario is done) and new_value (what the provider
     reports now). Deliberately distinct from system_properties' set_property
     — Settings and system properties are unrelated Android subsystems.
-    Deleting a setting (`settings delete`) isn't implemented yet.
+    Deleting a setting (`settings delete`) is not supported.
 
     Args:
         serial: The target device's adb serial (see list_connected_devices).

@@ -3,7 +3,7 @@ title: "Files: Push and Pull Files"
 description: "MCP tools to copy files between an Android device and the host via adb push and adb pull, restricted to a configured local folder."
 ---
 
-# files
+# Files
 
 Copying files between a connected device and this server's host
 (`adb push` / `adb pull`). Host-side paths are restricted to

@@ -3,7 +3,7 @@ title: "Content Providers: Query Rows"
 description: "MCP tool to query Android ContentProvider rows with projection, selection, and sort via adb shell content query."
 ---
 
-# content
+# Content Providers
 
 Reading rows from an exported or shell-accessible ContentProvider on a
 connected device (`adb shell content query`). `query_content` takes a typed

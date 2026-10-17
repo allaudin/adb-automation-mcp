@@ -305,10 +305,13 @@ adb-automation-mcp/
 ├── uv.lock
 ├── mkdocs.yml                # docs site config — nav, theme, mkdocstrings
 ├── README.md
-├── docs/                     # mkdocs source
+├── docs/                     # mkdocs source (user-facing site)
 │   ├── index.md
-│   ├── ARCHITECTURE.md
-│   ├── reference/            # one page per module, mkdocstrings-generated from tools.py
+│   ├── configuration.md      # env vars, saved files, safety controls, response format
+│   ├── ARCHITECTURE.md       # contributor docs — excluded from the published site
+│   ├── ADR.md                #   (see mkdocs.yml exclude_docs)
+│   ├── reference/            # index.md overview + one page per module,
+│   │                         # mkdocstrings-generated from tools.py
 │   └── integrations/         # per-MCP-client setup guides
 ├── LICENSE
 ├── .github/

@@ -1,9 +1,5 @@
-"""Module-level, statically-introspectable tool functions for the
-system_properties module.
-
-Kept as plain top-level functions, never closures, so that documentation tooling and
-the registry meta-test can both introspect them directly.
-"""
+# Tool functions are plain module-level functions, never closures, so that
+# documentation tooling and the registry meta-test can introspect them directly.
 
 from __future__ import annotations
 

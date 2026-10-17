@@ -1,9 +1,5 @@
-"""Module-level, statically-introspectable tool functions for the
-android_services module.
-
-Kept as plain top-level functions, never closures, so that documentation tooling and
-the registry meta-test can both introspect them directly.
-"""
+# Tool functions are plain module-level functions, never closures, so that
+# documentation tooling and the registry meta-test can introspect them directly.
 
 from __future__ import annotations
 
@@ -29,11 +25,10 @@ async def start_service(
 
     Models the target semantically (an explicit component) rather than
     accepting a raw `am` command string — see the module docs for why this
-    server never exposes arbitrary shell arguments. Only a plain
-    (non-foreground) service start is supported so far — foreground-service
-    starts, and stopping/querying a service's status, aren't implemented
-    yet (see the activities/broadcasts modules for launching activities or
-    sending broadcasts instead).
+    server never exposes arbitrary shell arguments. This is a plain
+    (non-foreground) service start — use start_foreground_service for a
+    foreground service, stop_service to stop one, and get_service_status to
+    check whether it's running.
 
     Args:
         serial: The target device's adb serial (see list_connected_devices).

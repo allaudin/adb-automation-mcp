@@ -3,7 +3,7 @@ title: "Packages: Install, Uninstall, Inspect Apps"
 description: "MCP tools to list, install, uninstall, inspect, and enable or disable Android apps over adb, with semantic options instead of raw pm flags."
 ---
 
-# packages
+# Packages
 
 Installed-app management on a connected device: listing (`pm list
 packages`), installing (`adb install`), uninstalling (`pm uninstall`),

@@ -5,11 +5,12 @@
 [![CI](https://github.com/allaudin/adb-automation-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/allaudin/adb-automation-mcp/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/adb-automation-mcp.svg?cacheSeconds=3600)](https://pypi.org/project/adb-automation-mcp/)
 
-An MCP server exposing Android Debug Bridge (ADB) capabilities as typed, documented
-tools and resources.
+An MCP server that lets AI assistants such as Claude work with Android devices and
+emulators through the Android Debug Bridge (ADB), using typed, documented,
+policy-controlled tools.
 
-**[Full documentation](https://allaudin.github.io/adb-automation-mcp/)** — architecture,
-per-tool reference, and client integration guides.
+**[Full documentation](https://allaudin.github.io/adb-automation-mcp/)**: setup,
+configuration, client integration guides, and the complete tool reference.
 
 ## Install
 
@@ -19,16 +20,8 @@ uvx adb-automation-mcp
 pip install adb-automation-mcp
 ```
 
-## Quickstart
-
-```bash
-uv sync
-uv run adb-automation-mcp
-```
-
-Talks to the `adb` binary on `PATH` by default. For real-device setup, the fake
-backend, the full tool list, and per-client integration guides (Claude Code, Claude
-Desktop, ...), see the [docs site](https://allaudin.github.io/adb-automation-mcp/).
+The server communicates over stdio and is normally started by your MCP client (see
+below). It uses the `adb` binary on `PATH` unless `ADB_AUTOMATION_ADB_PATH` is set.
 
 ## Installation prompt
 
@@ -41,10 +34,9 @@ absolute path, and registers this server for you.
 ## MCP client configuration
 
 Add this to your client's `mcp.json` (e.g. Claude Desktop's config, or a Claude Code
-project's `.mcp.json`). Every real-device env var is shown below — all are optional,
-see the [full reference](https://allaudin.github.io/adb-automation-mcp/#running-it) for
-defaults and details (including `ADB_AUTOMATION_BACKEND`, a testing-only switch to the fake
-in-memory backend, not something a real client config needs):
+project's `.mcp.json`). All settings are optional; see
+[Configuration](https://allaudin.github.io/adb-automation-mcp/configuration/) for
+defaults and details:
 
 ```json
 {
@@ -73,9 +65,10 @@ in-memory backend, not something a real client config needs):
   (`pull_file`, `stop_log_session`, `take_screenshot`) are allowed to write; unset
   means those tools refuse to write anywhere
 
-## Testing
+## Development
 
 ```bash
+uv sync              # install dependencies from a clone
 uv run pytest        # registry contract, unit, and e2e tests
 uv run mypy src       # strict type checking
 uv run ruff check .   # lint
@@ -85,7 +78,7 @@ uv run mkdocs build --strict   # docs site
 ## Tools
 
 **111 tools.** Full signatures, docstrings, and worked examples are in the
-[tool reference](https://allaudin.github.io/adb-automation-mcp/reference/diagnostics/).
+[tool reference](https://allaudin.github.io/adb-automation-mcp/reference/).
 Tools marked † are `destructive` — not registered unless
 `ADB_AUTOMATION_ALLOW_DESTRUCTIVE=1`.
 

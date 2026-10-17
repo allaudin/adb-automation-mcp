@@ -3,7 +3,7 @@ title: "ANR Reports"
 description: "MCP tool to retrieve Application Not Responding (ANR) reports for an Android package from DropBox via adb, newest first, with optional traces."
 ---
 
-# anr
+# ANR Reports
 
 Retrieving Application Not Responding (ANR) reports for a package from the
 device's DropBox (`adb shell dumpsys dropbox --print data_app_anr

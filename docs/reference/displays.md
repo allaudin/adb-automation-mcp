@@ -3,7 +3,7 @@ title: "Displays: Size, Density, Logical Displays"
 description: "MCP tools to list Android logical displays and read display size and density via adb dumpsys display and wm."
 ---
 
-# displays
+# Displays
 
 Reading a device's displays: `list_displays` enumerates every logical
 display from `adb shell dumpsys display`, and `get_display_size` /

@@ -1,9 +1,5 @@
-"""Module-level, statically-introspectable tool functions for the
-permissions module.
-
-Kept as plain top-level functions, never closures, so that documentation tooling and
-the registry meta-test can both introspect them directly.
-"""
+# Tool functions are plain module-level functions, never closures, so that
+# documentation tooling and the registry meta-test can introspect them directly.
 
 from __future__ import annotations
 
@@ -27,8 +23,8 @@ async def grant_permission(
     """Grant one Android runtime permission to a package: `adb shell pm grant`.
 
     Not every permission can actually be granted this way — see Error
-    handling below for the platform's own rejections. Revoking, checking,
-    and listing permissions aren't implemented yet.
+    handling below for the platform's own rejections. Use revoke_permission
+    to undo a grant and get_package_permissions to inspect the result.
 
     Args:
         serial: The target device's adb serial (see list_connected_devices).

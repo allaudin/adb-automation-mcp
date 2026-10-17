@@ -1,8 +1,5 @@
-"""Module-level, statically-introspectable tool functions for the activities module.
-
-Kept as plain top-level functions, never closures, so that documentation tooling and
-the registry meta-test can both introspect them directly.
-"""
+# Tool functions are plain module-level functions, never closures, so that
+# documentation tooling and the registry meta-test can introspect them directly.
 
 from __future__ import annotations
 
@@ -33,10 +30,9 @@ async def start_activity(
     Models the launch target semantically (an explicit component) rather
     than accepting a raw `am` command string — see the module docs for why
     this server never exposes arbitrary shell arguments. Only an explicit
-    component launch is supported so far; other Intent options (action,
-    extras, flags, data URI) aren't implemented yet, and this tool never
-    starts broadcasts or services (see the broadcasts/android_services
-    modules for those).
+    component launch is supported; other Intent options (action, extras,
+    flags, data URI) are not, and this tool never starts broadcasts or
+    services (use send_broadcast or start_service for those).
 
     Args:
         serial: The target device's adb serial (see list_connected_devices).

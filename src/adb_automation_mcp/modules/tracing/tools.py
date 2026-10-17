@@ -1,8 +1,5 @@
-"""Module-level, statically-introspectable tool functions for the tracing module.
-
-Kept as plain top-level functions, never closures, so that documentation tooling and
-the registry meta-test can both introspect them directly.
-"""
+# Tool functions are plain module-level functions, never closures, so that
+# documentation tooling and the registry meta-test can introspect them directly.
 
 from __future__ import annotations
 
@@ -33,7 +30,8 @@ async def capture_system_trace(
     """Capture a bounded Perfetto system trace: `adb shell perfetto ...` +
     `adb pull`.
 
-    v1 exposes semantic presets rather than a raw Perfetto config. Each
+    The trace is configured with semantic presets rather than a raw
+    Perfetto config. Each
     preset maps to a curated set of scheduler / atrace categories:
     `cpu`, `scheduling`, `graphics`, `app_startup`, `memory`, `binder`.
     The trace runs for duration_seconds (1-120), is pulled into

@@ -3,7 +3,7 @@ title: "Memory: Meminfo, Heap Dumps, Procstats"
 description: "MCP tools for Android memory diagnostics over adb: meminfo summaries, procstats history, heap dumps, heap watch, and smaps."
 ---
 
-# memory
+# Memory
 
 Structured memory diagnostics for a connected device.
 
